@@ -17,7 +17,15 @@ Format per entry:
 
 ## Open
 
-(none)
+## Scavenging mechanic shape — parked 2026-06-12
+**Blocked work:** Roadmap item 5 (grow your ship by scavenging defeated vessels)
+**Options:**
+- A: Sunk ships scatter floating loot blocks you sail over to collect —
+  simple, keeps the action at sea, works with today's systems
+- B: Ships get a "disabled" damage state (guns gone but afloat) and you pull
+  alongside to strip them block-by-block — richer and more piratey, but needs
+  block placement (roadmap item 3) and a build cursor first
+**Recommendation:** A now, evolve toward B once block placement lands.
 
 ## Resolved
 

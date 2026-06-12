@@ -1,8 +1,18 @@
+// Bevy system signatures routinely trip clippy's type_complexity lint;
+// allowing it crate-wide is the upstream-recommended practice.
+#![allow(clippy::type_complexity)]
+
+mod assets;
 mod blocks;
+mod combat;
+mod enemy;
+mod hud;
 mod ocean;
 mod ship;
 
 use bevy::prelude::*;
+
+use ship::PlayerShip;
 
 fn main() {
     App::new()
@@ -14,18 +24,46 @@ fn main() {
             ..default()
         }))
         .insert_resource(ClearColor(Color::srgb(0.55, 0.75, 0.90)))
+        .init_resource::<combat::GameStats>()
+        .init_resource::<enemy::FleetDirector>()
         .add_systems(
             Startup,
-            (setup_scene, ocean::spawn_ocean, ship::spawn_starter_barge),
+            (
+                assets::setup_assets,
+                setup_scene,
+                ocean::spawn_ocean,
+                ship::spawn_player_barge,
+                hud::setup_hud,
+            )
+                .chain(),
         )
-        .add_systems(Update, (ship::sail_ship, ship::float_ships).chain())
+        .add_systems(
+            Update,
+            (
+                ship::player_helm,
+                enemy::enemy_ai,
+                ship::drive_ships,
+                ship::float_ships,
+                combat::fire_cannons,
+                combat::update_cannonballs,
+                combat::sink_ships,
+                combat::update_debris,
+                combat::update_effects,
+                enemy::maintain_fleet,
+                ship::respawn_player,
+                ocean::follow_player,
+                chase_camera,
+                hud::update_hud,
+            )
+                .chain(),
+        )
         .run();
 }
 
 fn setup_scene(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(14.0, 10.0, 18.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(-16.0, 9.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
     commands.spawn((
         DirectionalLight {
@@ -35,4 +73,26 @@ fn setup_scene(mut commands: Commands) {
         },
         Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.9, 0.4, 0.0)),
     ));
+}
+
+/// Third-person chase camera: trail the player's ship from behind and above,
+/// easing toward the target so turns and wave bob read smoothly.
+fn chase_camera(
+    time: Res<Time>,
+    players: Query<&Transform, (With<PlayerShip>, Without<Camera3d>)>,
+    mut cameras: Query<&mut Transform, With<Camera3d>>,
+) {
+    let Ok(target) = players.single() else {
+        return;
+    };
+    let Ok(mut camera) = cameras.single_mut() else {
+        return;
+    };
+    let forward = target.rotation * Vec3::X;
+    let forward = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
+    let desired = target.translation - forward * 16.0 + Vec3::Y * 8.0;
+    let ease = 1.0 - (-time.delta_secs() * 3.0).exp();
+    camera.translation = camera.translation.lerp(desired, ease);
+    let look_at = target.translation + forward * 6.0 + Vec3::Y;
+    camera.look_at(look_at, Vec3::Y);
 }

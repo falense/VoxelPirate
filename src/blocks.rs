@@ -9,8 +9,19 @@ pub enum BlockId {
     OakHull,
     OakDeck,
     Mast,
+    Sail,
     Cannon,
 }
+
+/// Every block id, for systems that need to pre-build per-block assets.
+/// Keep in sync with [`BlockId`] when adding blocks.
+pub const ALL: [BlockId; 5] = [
+    BlockId::OakHull,
+    BlockId::OakDeck,
+    BlockId::Mast,
+    BlockId::Sail,
+    BlockId::Cannon,
+];
 
 /// Static properties of a block type. Mass feeds into buoyancy and handling
 /// once real ship physics lands; color is a placeholder until textures.
@@ -19,6 +30,8 @@ pub struct BlockDef {
     pub name: &'static str,
     pub mass: f32,
     pub color: Color,
+    /// Whether this block fires cannonballs when the ship's broadside fires.
+    pub gun: bool,
 }
 
 pub fn def(id: BlockId) -> BlockDef {
@@ -27,21 +40,31 @@ pub fn def(id: BlockId) -> BlockDef {
             name: "Oak Hull",
             mass: 40.0,
             color: Color::srgb(0.42, 0.27, 0.15),
+            gun: false,
         },
         BlockId::OakDeck => BlockDef {
             name: "Oak Deck",
             mass: 20.0,
             color: Color::srgb(0.62, 0.45, 0.26),
+            gun: false,
         },
         BlockId::Mast => BlockDef {
             name: "Mast",
             mass: 15.0,
             color: Color::srgb(0.50, 0.38, 0.24),
+            gun: false,
+        },
+        BlockId::Sail => BlockDef {
+            name: "Sail",
+            mass: 5.0,
+            color: Color::srgb(0.93, 0.91, 0.83),
+            gun: false,
         },
         BlockId::Cannon => BlockDef {
             name: "Cannon",
             mass: 120.0,
             color: Color::srgb(0.15, 0.15, 0.17),
+            gun: true,
         },
     }
 }
