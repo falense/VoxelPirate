@@ -54,7 +54,8 @@ preference the user would have wanted to make.
 
 1. ✅ Vertical slice: voxel barge, ocean plane, WASD sailing, fake wave bob
 2. Real buoyancy from per-block mass/volume; ship sinks when overloaded or holed
-3. Block placement/removal at sea; greedy meshing once per-cube entities get slow
+3. ✅ Block placement/removal at sea (Tab build mode, salvage economy);
+   greedy meshing still pending if per-cube entities get slow
 4. ✅ Cannons that fire and damage other ships' voxel grids (Q/E broadsides,
    blast damage with debris, sinking, AI sloops in an endless skirmish loop)
 5. Enemy/derelict vessels to scavenge; material tiers (AI vessels exist;

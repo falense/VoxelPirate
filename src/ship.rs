@@ -46,7 +46,6 @@ pub struct ShipVoxels {
     /// Offset from grid space to the ship's local origin: the center of the
     /// footprint at the waterline, so wave roll rotates about the midpoint.
     pub center: Vec3,
-    pub initial_count: usize,
     /// Flat (xz) radius of the hull around its origin, for coarse
     /// ship-vs-ship separation.
     pub radius: f32,
@@ -68,6 +67,11 @@ impl ShipVoxels {
     /// A cell's translation relative to the ship entity (child transform).
     pub fn local_offset(&self, cell: IVec3) -> Vec3 {
         (cell.as_vec3() + Vec3::splat(0.5)) * BLOCK_SIZE - self.center
+    }
+
+    /// Fraction of the design currently missing (battle damage).
+    pub fn damage_fraction(&self) -> f32 {
+        1.0 - self.blocks.len() as f32 / self.plan.len().max(1) as f32
     }
 }
 
@@ -163,7 +167,6 @@ pub fn spawn_ship(
         }
     });
 
-    let initial_count = blocks.len();
     let radius = layout
         .keys()
         .map(|pos| {
@@ -177,7 +180,6 @@ pub fn spawn_ship(
         blocks,
         plan: layout,
         center,
-        initial_count,
         radius,
     });
     ship
@@ -308,24 +310,20 @@ pub fn player_helm(
 /// onto the sea, and whichever side of the ship that point lies on fires.
 /// Keeps sailing on the left hand and gunnery on the right.
 pub fn player_fire_mouse(
+    mode: Res<crate::build::PlayMode>,
     mouse: Res<ButtonInput<MouseButton>>,
+    aim: Res<crate::build::AimOverride>,
     windows: Query<&Window>,
     cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     mut players: Query<(&Transform, &mut Broadsides), With<PlayerShip>>,
 ) {
+    if *mode != crate::build::PlayMode::Sail {
+        return;
+    }
     if !mouse.just_pressed(MouseButton::Left) {
         return;
     }
-    let Ok(window) = windows.single() else {
-        return;
-    };
-    let Some(cursor) = window.cursor_position() else {
-        return;
-    };
-    let Ok((camera, camera_transform)) = cameras.single() else {
-        return;
-    };
-    let Ok(ray) = camera.viewport_to_world(camera_transform, cursor) else {
+    let Some(ray) = crate::build::cursor_ray(&windows, &cameras, &aim) else {
         return;
     };
     if ray.direction.y.abs() < 1e-4 {
@@ -393,8 +391,7 @@ pub fn float_ships(
 ) {
     let t = time.elapsed_secs();
     for (ship, voxels, mut transform) in &mut ships {
-        let lost = 1.0 - voxels.blocks.len() as f32 / voxels.initial_count as f32;
-        let draft = lost * 0.7;
+        let draft = voxels.damage_fraction() * 0.7;
         let phase = transform.translation.x * 0.13 + transform.translation.z * 0.17;
         transform.translation.y = (t * 0.9 + phase).sin() * 0.12 - draft;
         let roll = (t * 0.7 + phase).sin() * 0.025;

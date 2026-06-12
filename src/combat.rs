@@ -13,7 +13,7 @@ const CANNONBALL_SPEED: f32 = 22.0;
 const CANNONBALL_LOFT: f32 = 3.0;
 /// Blocks within this many cells of the impact cell are destroyed.
 const BLAST_RADIUS: f32 = 1.6;
-/// A ship sinks once it has lost this fraction of its blocks.
+/// A ship sinks once it has lost this fraction of its designed blocks.
 const SINK_LOSS_FRACTION: f32 = 0.35;
 /// Quick-reject distance for ball/ship collision: farther than any block of
 /// the largest hull can be from its ship origin.
@@ -261,8 +261,7 @@ pub fn update_cannonballs(
                 );
                 crate::audio::play(&mut commands, &sounds.crunch, 0.7);
 
-                let lost = voxels.initial_count - voxels.blocks.len();
-                if lost as f32 >= voxels.initial_count as f32 * SINK_LOSS_FRACTION {
+                if voxels.damage_fraction() >= SINK_LOSS_FRACTION {
                     newly_sunk.insert(ship_entity);
                     commands.entity(ship_entity).insert(Sinking { age: 0.0 });
                     if is_player {

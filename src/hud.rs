@@ -8,6 +8,9 @@ use crate::salvage::{Derelict, Flotsam};
 use crate::ship::{PLAYER_CLASSES, PlayerShip, ShipVoxels, UPGRADE_COSTS};
 
 #[derive(Component)]
+pub struct ControlsText;
+
+#[derive(Component)]
 pub struct StatusText;
 
 #[derive(Component)]
@@ -18,7 +21,8 @@ pub struct CenterText;
 
 pub fn setup_hud(mut commands: Commands) {
     commands.spawn((
-        Text::new("WASD sail  ·  click to fire the broadside facing the cursor  ·  scroll to zoom"),
+        ControlsText,
+        Text::new(""),
         TextFont {
             font_size: 15.0,
             ..default()
@@ -84,12 +88,30 @@ pub fn setup_hud(mut commands: Commands) {
 
 pub fn update_hud(
     time: Res<Time>,
+    mode: Res<crate::build::PlayMode>,
+    build_state: Res<crate::build::BuildState>,
     mut stats: ResMut<GameStats>,
     players: Query<(&ShipVoxels, &Broadsides), (With<PlayerShip>, Without<Sinking>)>,
-    mut status: Query<&mut Text, (With<StatusText>, Without<CenterText>)>,
-    mut center: Query<&mut Text, (With<CenterText>, Without<StatusText>)>,
+    mut controls: Query<&mut Text, (With<ControlsText>, Without<StatusText>, Without<CenterText>)>,
+    mut status: Query<&mut Text, (With<StatusText>, Without<CenterText>, Without<ControlsText>)>,
+    mut center: Query<&mut Text, (With<CenterText>, Without<StatusText>, Without<ControlsText>)>,
 ) {
     stats.announce_ttl = (stats.announce_ttl - time.delta_secs()).max(0.0);
+
+    if let Ok(mut text) = controls.single_mut() {
+        text.0 = match *mode {
+            crate::build::PlayMode::Sail => {
+                "WASD sail  ·  click fires the broadside facing the cursor  ·  scroll zoom  ·  Tab: build mode".into()
+            }
+            crate::build::PlayMode::Build => {
+                let def = crate::blocks::def(build_state.selected);
+                format!(
+                    "BUILD MODE — 1-6 select block  ·  click place ({} costs {})  ·  right-click remove (refund)  ·  Tab: sail",
+                    def.name, def.cost,
+                )
+            }
+        };
+    }
 
     if let Ok(mut text) = status.single_mut() {
         let salvage = if stats.tier < UPGRADE_COSTS.len() {
@@ -103,7 +125,7 @@ pub fn update_hud(
             format!("Salvage {}", stats.salvage)
         };
         if let Ok((voxels, guns)) = players.single() {
-            let hull = voxels.blocks.len() as f32 / voxels.initial_count as f32 * 100.0;
+            let hull = (1.0 - voxels.damage_fraction()) * 100.0;
             text.0 = format!(
                 "{}   Hull {hull:.0}%   Port {}   Starboard {}   {salvage}   Ships sunk: {}",
                 PLAYER_CLASSES[stats.tier].name,

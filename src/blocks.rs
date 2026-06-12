@@ -34,6 +34,8 @@ pub struct BlockDef {
     pub color: Color,
     /// Whether this block fires cannonballs when the ship's broadside fires.
     pub gun: bool,
+    /// Salvage price to place one in build mode (removal refunds it).
+    pub cost: u32,
 }
 
 pub fn def(id: BlockId) -> BlockDef {
@@ -43,36 +45,42 @@ pub fn def(id: BlockId) -> BlockDef {
             mass: 40.0,
             color: Color::srgb(0.42, 0.27, 0.15),
             gun: false,
+            cost: 1,
         },
         BlockId::IronHull => BlockDef {
             name: "Iron Hull",
             mass: 80.0,
             color: Color::srgb(0.36, 0.38, 0.42),
             gun: false,
+            cost: 3,
         },
         BlockId::OakDeck => BlockDef {
             name: "Oak Deck",
             mass: 20.0,
             color: Color::srgb(0.62, 0.45, 0.26),
             gun: false,
+            cost: 1,
         },
         BlockId::Mast => BlockDef {
             name: "Mast",
             mass: 15.0,
             color: Color::srgb(0.50, 0.38, 0.24),
             gun: false,
+            cost: 2,
         },
         BlockId::Sail => BlockDef {
             name: "Sail",
             mass: 5.0,
             color: Color::srgb(0.93, 0.91, 0.83),
             gun: false,
+            cost: 2,
         },
         BlockId::Cannon => BlockDef {
             name: "Cannon",
             mass: 120.0,
             color: Color::srgb(0.15, 0.15, 0.17),
             gun: true,
+            cost: 8,
         },
     }
 }
