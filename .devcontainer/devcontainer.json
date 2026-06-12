@@ -12,6 +12,7 @@
   "runArgs": [
     "--cap-add=NET_ADMIN",
     "--cap-add=NET_RAW",
+    "--device=/dev/dri",
     "--env-file",
     ".devcontainer/devcontainer.env"
   ],
@@ -44,12 +45,17 @@
   "remoteUser": "node",
   "mounts": [
     "source=claude-code-bashhistory-${devcontainerId},target=/commandhistory,type=volume",
-    "source=claude-code-config-${devcontainerId},target=/home/node/.claude,type=volume"
+    "source=${localEnv:HOME}/.claude,target=${localEnv:HOME}/.claude,type=bind",
+    "source=craftpirate-cargo-registry,target=/home/node/.cargo/registry,type=volume",
+    "source=craftpirate-target,target=/workspace/target,type=volume",
+    "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind"
   ],
   "containerEnv": {
     "NODE_OPTIONS": "--max-old-space-size=4096",
-    "CLAUDE_CONFIG_DIR": "/home/node/.claude",
-    "POWERLEVEL9K_DISABLE_GITSTATUS": "true"
+    "CLAUDE_CONFIG_DIR": "${localEnv:HOME}/.claude",
+    "POWERLEVEL9K_DISABLE_GITSTATUS": "true",
+    "DISPLAY": "${localEnv:DISPLAY::0}",
+    "WINIT_UNIX_BACKEND": "x11"
   },
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
   "workspaceFolder": "/workspace",

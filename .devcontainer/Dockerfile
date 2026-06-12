@@ -28,6 +28,30 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   curl \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Rust/Bevy build and runtime dependencies:
+# - build-essential, clang, mold: compiler and fast linker
+# - pkg-config, libasound2-dev, libudev-dev: Bevy's Linux build requirements
+# - libvulkan1, mesa-vulkan-drivers, vulkan-tools: GPU rendering via /dev/dri
+# - libx11/libxkbcommon/libwayland: winit windowing against the host display
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  build-essential \
+  clang \
+  mold \
+  pkg-config \
+  libasound2-dev \
+  libudev-dev \
+  libvulkan1 \
+  mesa-vulkan-drivers \
+  vulkan-tools \
+  libx11-dev \
+  libxcursor-dev \
+  libxrandr-dev \
+  libxi-dev \
+  libxkbcommon-dev \
+  libxkbcommon-x11-0 \
+  libwayland-dev \
+  && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # Ensure default node user has access to /usr/local/share
 RUN mkdir -p /usr/local/share/npm-global && \
   chown -R node:node /usr/local/share
@@ -85,6 +109,11 @@ RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 # Install UV (Python package manager)
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/home/node/.local/bin:$PATH"
+
+# Install Rust toolchain (rustup) for the node user
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal \
+  && /home/node/.cargo/bin/rustup component add clippy rustfmt
+ENV PATH="/home/node/.cargo/bin:$PATH"
 
 # Install AWS CLI
 RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"

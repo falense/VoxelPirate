@@ -65,6 +65,10 @@
 
 # # Resolve and add other allowed domains
 # for domain in \
+#     "crates.io" \
+#     "index.crates.io" \
+#     "static.crates.io" \
+#     "static.rust-lang.org" \
 #     "registry.npmjs.org" \
 #     "api.anthropic.com" \
 #     "sentry.io" \
