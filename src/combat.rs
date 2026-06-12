@@ -22,7 +22,20 @@ const SHIP_BOUNDS_RADIUS: f32 = 15.0;
 #[derive(Resource, Default)]
 pub struct GameStats {
     pub kills: u32,
+    /// Banked salvage blocks; spent automatically on hull upgrades.
+    pub salvage: u32,
+    /// Index into ship::PLAYER_CLASSES — survives death.
+    pub tier: usize,
     pub player_sunk: bool,
+    pub announcement: String,
+    pub announce_ttl: f32,
+}
+
+impl GameStats {
+    pub fn announce(&mut self, message: impl Into<String>) {
+        self.announcement = message.into();
+        self.announce_ttl = 4.0;
+    }
 }
 
 /// Broadside fire control. Intent flags are set by player input or AI and
@@ -155,7 +168,13 @@ pub fn update_cannonballs(
     mut stats: ResMut<GameStats>,
     mut balls: Query<(Entity, &mut CannonBall, &mut Transform), Without<Ship>>,
     mut ships: Query<
-        (Entity, &Transform, &mut ShipVoxels, Has<PlayerShip>),
+        (
+            Entity,
+            &Transform,
+            &mut ShipVoxels,
+            Has<PlayerShip>,
+            Has<crate::salvage::Derelict>,
+        ),
         (With<Ship>, Without<Sinking>),
     >,
     player_shooters: Query<(), With<PlayerShip>>,
@@ -175,7 +194,7 @@ pub fn update_cannonballs(
         for i in 1..=substeps {
             let point = ball_transform.translation + step * (i as f32 / substeps as f32);
 
-            for (ship_entity, ship_transform, mut voxels, is_player) in &mut ships {
+            for (ship_entity, ship_transform, mut voxels, is_player, is_derelict) in &mut ships {
                 if ship_entity == ball.shooter || newly_sunk.contains(&ship_entity) {
                     continue;
                 }
@@ -226,8 +245,23 @@ pub fn update_cannonballs(
                     commands.entity(ship_entity).insert(Sinking { age: 0.0 });
                     if is_player {
                         stats.player_sunk = true;
+                    } else if is_derelict {
+                        stats.announce("Derelict broke apart — salvage adrift!");
                     } else if player_shooters.contains(ball.shooter) {
                         stats.kills += 1;
+                    }
+                    // A share of the wreck bobs up as collectible flotsam.
+                    for (count, (cell, voxel)) in voxels.blocks.iter().step_by(3).enumerate() {
+                        if count >= 10 {
+                            break;
+                        }
+                        let world = voxels.grid_to_world(ship_transform, *cell);
+                        crate::salvage::spawn_flotsam(
+                            &mut commands,
+                            &assets,
+                            voxel.id,
+                            Vec3::new(world.x, 0.15, world.z),
+                        );
                     }
                 }
 

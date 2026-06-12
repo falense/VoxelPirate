@@ -8,9 +8,6 @@ use crate::combat::{Broadsides, GameStats, Sinking};
 
 pub const BLOCK_SIZE: f32 = 1.0;
 
-const PLAYER_RELOAD: f32 = 2.2;
-const PLAYER_TOP_SPEED: f32 = 6.0;
-
 /// A sailable vessel. Yaw and speed live here (not in the Transform) because
 /// the float system rewrites the transform's rotation every frame to combine
 /// heading with wave roll/pitch.
@@ -43,10 +40,16 @@ pub struct Voxel {
 #[derive(Component)]
 pub struct ShipVoxels {
     pub blocks: HashMap<IVec3, Voxel>,
+    /// The as-designed layout; cells present here but missing from `blocks`
+    /// are battle damage that salvage can repair.
+    pub plan: HashMap<IVec3, BlockId>,
     /// Offset from grid space to the ship's local origin: the center of the
     /// footprint at the waterline, so wave roll rotates about the midpoint.
     pub center: Vec3,
     pub initial_count: usize,
+    /// Flat (xz) radius of the hull around its origin, for coarse
+    /// ship-vs-ship separation.
+    pub radius: f32,
 }
 
 impl ShipVoxels {
@@ -59,10 +62,54 @@ impl ShipVoxels {
     }
 
     pub fn grid_to_world(&self, ship_transform: &Transform, cell: IVec3) -> Vec3 {
-        ship_transform
-            .transform_point((cell.as_vec3() + Vec3::splat(0.5)) * BLOCK_SIZE - self.center)
+        ship_transform.transform_point(self.local_offset(cell))
+    }
+
+    /// A cell's translation relative to the ship entity (child transform).
+    pub fn local_offset(&self, cell: IVec3) -> Vec3 {
+        (cell.as_vec3() + Vec3::splat(0.5)) * BLOCK_SIZE - self.center
     }
 }
+
+/// A hull design plus its sailing characteristics. Used for the player's
+/// upgrade ladder and for enemy variety.
+pub struct ShipClass {
+    pub name: &'static str,
+    pub layout: fn() -> HashMap<IVec3, BlockId>,
+    pub reload: f32,
+    pub top_speed: f32,
+}
+
+/// The player's upgrade ladder; salvage pays for each step up.
+pub const PLAYER_CLASSES: [ShipClass; 4] = [
+    ShipClass {
+        name: "Barge",
+        layout: barge_layout,
+        reload: 2.2,
+        top_speed: 6.0,
+    },
+    ShipClass {
+        name: "Brig",
+        layout: brig_layout,
+        reload: 2.0,
+        top_speed: 6.4,
+    },
+    ShipClass {
+        name: "Frigate",
+        layout: frigate_layout,
+        reload: 1.9,
+        top_speed: 6.8,
+    },
+    ShipClass {
+        name: "Galleon",
+        layout: galleon_layout,
+        reload: 1.8,
+        top_speed: 7.0,
+    },
+];
+
+/// Salvage cost to step from tier i to tier i + 1.
+pub const UPGRADE_COSTS: [u32; 3] = [12, 30, 60];
 
 /// Spawn a ship from a block layout. The grid is centered on its footprint
 /// so the hull rolls about its midpoint; grid y = 1 sits on the waterline.
@@ -117,70 +164,116 @@ pub fn spawn_ship(
     });
 
     let initial_count = blocks.len();
+    let radius = layout
+        .keys()
+        .map(|pos| {
+            ((pos.as_vec3() + Vec3::splat(0.5)) * BLOCK_SIZE - center)
+                .xz()
+                .length()
+        })
+        .fold(0.0_f32, f32::max)
+        + 0.5;
     commands.entity(ship).insert(ShipVoxels {
         blocks,
+        plan: layout,
         center,
         initial_count,
+        radius,
     });
     ship
 }
 
-/// The starter vessel: a flat 8x4 barge with a mast, a sail, and two cannons
-/// per side.
+/// Shared hull builder: a `length` x `width` deck-on-hull slab with masts
+/// (plus square sails) at the given x positions and cannons along both rails.
+fn hull_layout(
+    length: i32,
+    width: i32,
+    hull: BlockId,
+    mast_xs: &[i32],
+    mast_height: i32,
+    cannon_xs: &[i32],
+) -> HashMap<IVec3, BlockId> {
+    let mut layout = HashMap::new();
+    for x in 0..length {
+        for z in 0..width {
+            layout.insert(IVec3::new(x, 0, z), hull);
+            layout.insert(IVec3::new(x, 1, z), BlockId::OakDeck);
+        }
+    }
+    let mast_z = width / 2;
+    for &x in mast_xs {
+        for y in 2..2 + mast_height {
+            layout.insert(IVec3::new(x, y, mast_z), BlockId::Mast);
+        }
+        for y in 3..1 + mast_height {
+            for z in 0..width {
+                if z != mast_z {
+                    layout.insert(IVec3::new(x, y, z), BlockId::Sail);
+                }
+            }
+        }
+    }
+    for &x in cannon_xs {
+        for z in [0, width - 1] {
+            layout.insert(IVec3::new(x, 2, z), BlockId::Cannon);
+        }
+    }
+    layout
+}
+
+/// Tier 0: the starter barge — 8x4, one mast, two cannons per side.
 pub fn barge_layout() -> HashMap<IVec3, BlockId> {
-    let mut layout = HashMap::new();
-    for x in 0..8 {
-        for z in 0..4 {
-            layout.insert(IVec3::new(x, 0, z), BlockId::OakHull);
-            layout.insert(IVec3::new(x, 1, z), BlockId::OakDeck);
-        }
-    }
-    for y in 2..7 {
-        layout.insert(IVec3::new(4, y, 2), BlockId::Mast);
-    }
-    for y in 3..6 {
-        for z in [0, 1, 3] {
-            layout.insert(IVec3::new(4, y, z), BlockId::Sail);
-        }
-    }
-    for x in [2, 5] {
-        for z in [0, 3] {
-            layout.insert(IVec3::new(x, 2, z), BlockId::Cannon);
-        }
-    }
-    layout
+    hull_layout(8, 4, BlockId::OakHull, &[4], 5, &[2, 6])
 }
 
-/// Enemy vessel: a narrower 7x3 sloop with two cannons per side.
+/// Tier 1: brig — 10x5, two masts, three cannons per side.
+pub fn brig_layout() -> HashMap<IVec3, BlockId> {
+    hull_layout(10, 5, BlockId::OakHull, &[2, 6], 5, &[1, 4, 8])
+}
+
+/// Tier 2: frigate — 12x5, iron hull, four cannons per side.
+pub fn frigate_layout() -> HashMap<IVec3, BlockId> {
+    hull_layout(12, 5, BlockId::IronHull, &[3, 8], 6, &[1, 4, 7, 10])
+}
+
+/// Tier 3: galleon — 14x6, iron hull, three masts, five cannons per side.
+pub fn galleon_layout() -> HashMap<IVec3, BlockId> {
+    hull_layout(14, 6, BlockId::IronHull, &[3, 7, 11], 6, &[1, 4, 7, 10, 13])
+}
+
+/// Smallest hostile: 7x3 sloop, two cannons per side.
 pub fn sloop_layout() -> HashMap<IVec3, BlockId> {
-    let mut layout = HashMap::new();
-    for x in 0..7 {
-        for z in 0..3 {
-            layout.insert(IVec3::new(x, 0, z), BlockId::OakHull);
-            layout.insert(IVec3::new(x, 1, z), BlockId::OakDeck);
-        }
-    }
-    for y in 2..6 {
-        layout.insert(IVec3::new(3, y, 1), BlockId::Mast);
-    }
-    for y in 3..5 {
-        for z in [0, 2] {
-            layout.insert(IVec3::new(3, y, z), BlockId::Sail);
-        }
-    }
-    for x in [1, 5] {
-        for z in [0, 2] {
-            layout.insert(IVec3::new(x, 2, z), BlockId::Cannon);
-        }
-    }
-    layout
+    hull_layout(7, 3, BlockId::OakHull, &[3], 4, &[1, 5])
 }
 
-pub fn spawn_player_barge(mut commands: Commands, assets: Res<GameAssets>) {
-    spawn_player_barge_inner(&mut commands, &assets);
+/// Spawn the player's ship for the given upgrade tier.
+pub fn spawn_player(
+    commands: &mut Commands,
+    assets: &GameAssets,
+    tier: usize,
+    position: Vec3,
+    yaw: f32,
+) -> Entity {
+    let class = &PLAYER_CLASSES[tier];
+    let ship = spawn_ship(
+        commands,
+        assets,
+        (class.layout)(),
+        position,
+        yaw,
+        class.reload,
+        class.top_speed,
+    );
+    commands.entity(ship).insert(PlayerShip);
+    ship
 }
 
-/// WASD steers, Q/E fire the port/starboard broadside.
+pub fn spawn_player_start(mut commands: Commands, assets: Res<GameAssets>) {
+    spawn_player(&mut commands, &assets, 0, Vec3::ZERO, 0.0);
+}
+
+/// WASD steers; Q/E fire broadsides for keyboard-only play (the primary
+/// firing control is the mouse, see [`player_fire_mouse`]).
 pub fn player_helm(
     keys: Res<ButtonInput<KeyCode>>,
     mut players: Query<(&mut Helm, &mut Broadsides), With<PlayerShip>>,
@@ -211,6 +304,48 @@ pub fn player_helm(
     }
 }
 
+/// Left click fires the broadside facing the cursor: the click is projected
+/// onto the sea, and whichever side of the ship that point lies on fires.
+/// Keeps sailing on the left hand and gunnery on the right.
+pub fn player_fire_mouse(
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
+    cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    mut players: Query<(&Transform, &mut Broadsides), With<PlayerShip>>,
+) {
+    if !mouse.just_pressed(MouseButton::Left) {
+        return;
+    }
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+    let Ok((camera, camera_transform)) = cameras.single() else {
+        return;
+    };
+    let Ok(ray) = camera.viewport_to_world(camera_transform, cursor) else {
+        return;
+    };
+    if ray.direction.y.abs() < 1e-4 {
+        return;
+    }
+    let t = -ray.origin.y / ray.direction.y;
+    if t < 0.0 {
+        return;
+    }
+    let aim_point = ray.origin + ray.direction * t;
+    for (transform, mut guns) in &mut players {
+        let starboard = transform.rotation * Vec3::Z;
+        if (aim_point - transform.translation).dot(starboard) >= 0.0 {
+            guns.fire_starboard = true;
+        } else {
+            guns.fire_port = true;
+        }
+    }
+}
+
 /// Apply helm intent: thrust with water drag, turning authority that scales
 /// with speed — a ship dead in the water barely answers the helm.
 pub fn drive_ships(
@@ -227,14 +362,37 @@ pub fn drive_ships(
     }
 }
 
+/// Coarse collision between hulls: when two ships' bounding circles overlap
+/// they shoulder each other apart instead of interpenetrating.
+pub fn separate_ships(mut ships: Query<(&ShipVoxels, &mut Transform), Without<Sinking>>) {
+    let mut pairs = ships.iter_combinations_mut();
+    while let Some([(voxels_a, mut a), (voxels_b, mut b)]) = pairs.fetch_next() {
+        let mut delta = b.translation - a.translation;
+        delta.y = 0.0;
+        let distance = delta.length();
+        // Circles overstate long narrow hulls; allow some overlap.
+        let min_distance = (voxels_a.radius + voxels_b.radius) * 0.7;
+        if distance < min_distance && distance > 0.001 {
+            let push = delta / distance * ((min_distance - distance) * 0.5);
+            a.translation -= push;
+            b.translation += push;
+        }
+    }
+}
+
 /// Fake buoyancy until real per-block physics: bob on a sine swell and
 /// combine heading with a gentle roll/pitch. Phase varies with position so
-/// ships don't bob in lockstep.
-pub fn float_ships(time: Res<Time>, mut ships: Query<(&Ship, &mut Transform), Without<Sinking>>) {
+/// ships don't bob in lockstep, and battle damage makes a ship ride lower.
+pub fn float_ships(
+    time: Res<Time>,
+    mut ships: Query<(&Ship, &ShipVoxels, &mut Transform), Without<Sinking>>,
+) {
     let t = time.elapsed_secs();
-    for (ship, mut transform) in &mut ships {
+    for (ship, voxels, mut transform) in &mut ships {
+        let lost = 1.0 - voxels.blocks.len() as f32 / voxels.initial_count as f32;
+        let draft = lost * 0.7;
         let phase = transform.translation.x * 0.13 + transform.translation.z * 0.17;
-        transform.translation.y = (t * 0.9 + phase).sin() * 0.12;
+        transform.translation.y = (t * 0.9 + phase).sin() * 0.12 - draft;
         let roll = (t * 0.7 + phase).sin() * 0.025;
         let pitch = (t * 0.5 + phase).cos() * 0.015;
         transform.rotation = Quat::from_rotation_y(ship.yaw)
@@ -243,7 +401,8 @@ pub fn float_ships(time: Res<Time>, mut ships: Query<(&Ship, &mut Transform), Wi
     }
 }
 
-/// After the player's ship has gone down, R launches a fresh barge.
+/// After the player's ship has gone down, R launches a fresh ship of the
+/// same tier — death costs banked salvage progress only in time.
 pub fn respawn_player(
     keys: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
@@ -260,19 +419,6 @@ pub fn respawn_player(
     for (entity, _) in &players {
         commands.entity(entity).despawn();
     }
-    spawn_player_barge_inner(&mut commands, &assets);
+    spawn_player(&mut commands, &assets, stats.tier, Vec3::ZERO, 0.0);
     stats.player_sunk = false;
-}
-
-fn spawn_player_barge_inner(commands: &mut Commands, assets: &GameAssets) {
-    let ship = spawn_ship(
-        commands,
-        assets,
-        barge_layout(),
-        Vec3::ZERO,
-        0.0,
-        PLAYER_RELOAD,
-        PLAYER_TOP_SPEED,
-    );
-    commands.entity(ship).insert(PlayerShip);
 }

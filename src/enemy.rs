@@ -1,17 +1,13 @@
+use std::collections::HashMap;
 use std::f32::consts::{PI, TAU};
 
 use bevy::prelude::*;
 
 use crate::assets::GameAssets;
-use crate::combat::{Broadsides, Sinking};
+use crate::blocks::BlockId;
+use crate::combat::{Broadsides, GameStats, Sinking};
 use crate::ship::{self, Helm, PlayerShip, Ship};
 
-// Enemies reload slower and sail slower than the player: a careful player
-// should win a 2-vs-1, and an idle one should still have time to react.
-const ENEMY_RELOAD: f32 = 6.0;
-const ENEMY_TOP_SPEED: f32 = 5.0;
-/// How many hostile ships the director keeps on the water.
-const FLEET_SIZE: usize = 2;
 const SPAWN_DISTANCE: f32 = 55.0;
 /// Maximum range at which the AI bothers firing — just past the ballistic
 /// range of a broadside.
@@ -23,42 +19,94 @@ pub struct EnemyAi;
 #[derive(Resource, Default)]
 pub struct FleetDirector {
     spawned: u32,
+    /// Highest class index already announced, so each new hostile type gets
+    /// one "sighted!" call-out.
+    announced: usize,
 }
 
-/// Keep FLEET_SIZE hostiles on the water: whenever one goes down, a new
-/// sloop appears over the horizon. Spawn bearings step around a golden-angle
-/// sequence so reinforcements don't always come from the same direction.
+/// Hostile classes. Enemies reload slower and sail slower than the player's
+/// equivalent hull: a careful player wins outnumbered fights.
+struct EnemyClass {
+    name: &'static str,
+    layout: fn() -> HashMap<IVec3, BlockId>,
+    reload: f32,
+    top_speed: f32,
+    /// Player kill count at which this class starts appearing.
+    unlock_kills: u32,
+}
+
+const ENEMY_CLASSES: [EnemyClass; 3] = [
+    EnemyClass {
+        name: "sloop",
+        layout: ship::sloop_layout,
+        reload: 6.0,
+        top_speed: 5.0,
+        unlock_kills: 0,
+    },
+    EnemyClass {
+        name: "brig",
+        layout: ship::brig_layout,
+        reload: 5.5,
+        top_speed: 5.4,
+        unlock_kills: 4,
+    },
+    EnemyClass {
+        name: "frigate",
+        layout: ship::frigate_layout,
+        reload: 5.0,
+        top_speed: 5.8,
+        unlock_kills: 10,
+    },
+];
+
+/// Keep the hostile fleet topped up: it grows from two to four ships as the
+/// player racks up kills, and tougher classes join the rotation. Spawn
+/// bearings step around a golden-angle sequence so reinforcements don't
+/// always come from the same direction.
 pub fn maintain_fleet(
     mut commands: Commands,
     assets: Res<GameAssets>,
+    mut stats: ResMut<GameStats>,
     mut director: ResMut<FleetDirector>,
     enemies: Query<(), (With<EnemyAi>, Without<Sinking>)>,
     players: Query<&Transform, With<PlayerShip>>,
 ) {
+    let target_fleet = (2 + stats.kills as usize / 5).min(4);
     let alive = enemies.iter().count();
-    if alive >= FLEET_SIZE {
+    if alive >= target_fleet {
         return;
     }
     let Ok(player) = players.single() else {
         return;
     };
-    for _ in alive..FLEET_SIZE {
+    for _ in alive..target_fleet {
         director.spawned += 1;
+        let unlocked: Vec<(usize, &EnemyClass)> = ENEMY_CLASSES
+            .iter()
+            .enumerate()
+            .filter(|(_, class)| stats.kills >= class.unlock_kills)
+            .collect();
+        let (class_index, class) = unlocked[director.spawned as usize % unlocked.len()];
+        if class_index > director.announced {
+            director.announced = class_index;
+            stats.announce(format!("A hostile {} has been sighted!", class.name));
+        }
+
         let bearing = director.spawned as f32 * 2.399963; // golden angle
         let offset = Vec3::new(bearing.cos(), 0.0, bearing.sin()) * SPAWN_DISTANCE;
         let position = (player.translation + offset).with_y(0.0);
         let to_player = player.translation - position;
         let yaw = (-to_player.z).atan2(to_player.x);
-        let sloop = ship::spawn_ship(
+        let hostile = ship::spawn_ship(
             &mut commands,
             &assets,
-            ship::sloop_layout(),
+            (class.layout)(),
             position,
             yaw,
-            ENEMY_RELOAD,
-            ENEMY_TOP_SPEED,
+            class.reload,
+            class.top_speed,
         );
-        commands.entity(sloop).insert(EnemyAi);
+        commands.entity(hostile).insert(EnemyAi);
     }
 }
 

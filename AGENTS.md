@@ -1,4 +1,6 @@
-# CraftPirate
+# VoxelPirates
+
+(Formerly CraftPirate — the repository directory keeps the old name.)
 
 A voxel-based pirate game: Minecraft-style block building, but the world is the
 open sea. You start with a small barge and grow it into a warship by scavenging

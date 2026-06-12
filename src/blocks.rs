@@ -7,6 +7,7 @@ use bevy::prelude::*;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum BlockId {
     OakHull,
+    IronHull,
     OakDeck,
     Mast,
     Sail,
@@ -15,8 +16,9 @@ pub enum BlockId {
 
 /// Every block id, for systems that need to pre-build per-block assets.
 /// Keep in sync with [`BlockId`] when adding blocks.
-pub const ALL: [BlockId; 5] = [
+pub const ALL: [BlockId; 6] = [
     BlockId::OakHull,
+    BlockId::IronHull,
     BlockId::OakDeck,
     BlockId::Mast,
     BlockId::Sail,
@@ -40,6 +42,12 @@ pub fn def(id: BlockId) -> BlockDef {
             name: "Oak Hull",
             mass: 40.0,
             color: Color::srgb(0.42, 0.27, 0.15),
+            gun: false,
+        },
+        BlockId::IronHull => BlockDef {
+            name: "Iron Hull",
+            mass: 80.0,
+            color: Color::srgb(0.36, 0.38, 0.42),
             gun: false,
         },
         BlockId::OakDeck => BlockDef {
