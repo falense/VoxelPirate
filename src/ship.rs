@@ -347,17 +347,21 @@ pub fn player_fire_mouse(
 }
 
 /// Apply helm intent: thrust with water drag, turning authority that scales
-/// with speed — a ship dead in the water barely answers the helm.
+/// with speed — a ship dead in the water barely answers the helm. Running
+/// with the wind is faster than beating into it, for every ship alike.
 pub fn drive_ships(
     time: Res<Time>,
+    wind: Res<crate::ocean::Wind>,
     mut ships: Query<(&mut Ship, &Helm, &mut Transform), Without<Sinking>>,
 ) {
     let dt = time.delta_secs();
+    let wind_dir = wind.dir();
     for (mut ship, helm, mut transform) in &mut ships {
         ship.yaw += helm.turn * dt * (0.2 + 0.15 * ship.speed.abs());
-        let speed = (ship.speed + helm.thrust * 3.0 * dt) * (1.0 - 0.3 * dt);
-        ship.speed = speed.clamp(-2.0, ship.top_speed);
         let forward = Quat::from_rotation_y(ship.yaw) * Vec3::X;
+        let wind_factor = 1.0 + 0.25 * forward.dot(wind_dir);
+        let speed = (ship.speed + helm.thrust * 3.0 * wind_factor * dt) * (1.0 - 0.3 * dt);
+        ship.speed = speed.clamp(-2.0, ship.top_speed * wind_factor);
         transform.translation += forward * ship.speed * dt;
     }
 }

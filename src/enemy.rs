@@ -65,12 +65,18 @@ const ENEMY_CLASSES: [EnemyClass; 3] = [
 /// always come from the same direction.
 pub fn maintain_fleet(
     mut commands: Commands,
+    time: Res<Time>,
     assets: Res<GameAssets>,
     mut stats: ResMut<GameStats>,
     mut director: ResMut<FleetDirector>,
     enemies: Query<(), (With<EnemyAi>, Without<Sinking>)>,
     players: Query<&Transform, With<PlayerShip>>,
 ) {
+    // A short grace period after launch: let the player find the helm
+    // before the first hostiles appear over the horizon.
+    if time.elapsed_secs() < 12.0 {
+        return;
+    }
     let target_fleet = (2 + stats.kills as usize / 5).min(4);
     let alive = enemies.iter().count();
     if alive >= target_fleet {

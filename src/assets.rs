@@ -46,13 +46,13 @@ pub fn setup_assets(
             ..default()
         }),
         splash_material: materials.add(StandardMaterial {
-            base_color: Color::srgba(0.85, 0.93, 1.0, 0.6),
+            base_color: Color::srgba(0.93, 0.97, 1.0, 0.45),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()
         }),
         smoke_material: materials.add(StandardMaterial {
-            base_color: Color::srgba(0.35, 0.35, 0.35, 0.7),
+            base_color: Color::srgba(0.45, 0.44, 0.42, 0.4),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()

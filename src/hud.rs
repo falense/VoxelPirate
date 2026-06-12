@@ -137,6 +137,7 @@ fn reload_label(remaining: f32) -> String {
 /// Lookout's report: clock bearing and range to the nearest foe, derelict,
 /// and flotsam, so there's always a heading worth sailing.
 pub fn update_intel(
+    wind: Res<crate::ocean::Wind>,
     players: Query<&Transform, (With<PlayerShip>, Without<Sinking>)>,
     enemies: Query<&Transform, (With<EnemyAi>, Without<Sinking>)>,
     derelicts: Query<&Transform, (With<Derelict>, Without<Sinking>)>,
@@ -150,7 +151,10 @@ pub fn update_intel(
         text.0 = String::new();
         return;
     };
-    let mut parts = Vec::new();
+    let mut parts = vec![format!(
+        "Wind blowing toward {} o'clock",
+        clock_hours(player, wind.dir())
+    )];
     if let Some(report) = nearest_report("Foe", player, enemies.iter()) {
         parts.push(report);
     }
@@ -176,15 +180,20 @@ fn nearest_report<'a>(
     let mut to_target = nearest.translation - player.translation;
     to_target.y = 0.0;
     let distance = to_target.length();
-    let dir = to_target.normalize_or_zero();
+    let hours = clock_hours(player, to_target.normalize_or_zero());
+    Some(format!("{label} {hours} o'clock, {distance:.0}m"))
+}
+
+/// Clock bearing of a direction measured clockwise from the bow:
+/// dead ahead = 12, starboard beam = 3.
+fn clock_hours(player: &Transform, dir: Vec3) -> i32 {
     let forward = (player.rotation * Vec3::X).with_y(0.0).normalize_or_zero();
     let starboard = (player.rotation * Vec3::Z).with_y(0.0).normalize_or_zero();
-    // Clock bearing measured clockwise from the bow: starboard beam = 3.
     let theta = dir.dot(starboard).atan2(dir.dot(forward));
     let mut hours = (theta / (PI / 6.0)).round() as i32;
     hours = hours.rem_euclid(12);
     if hours == 0 {
         hours = 12;
     }
-    Some(format!("{label} {hours} o'clock, {distance:.0}m"))
+    hours
 }

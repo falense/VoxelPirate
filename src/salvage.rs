@@ -53,6 +53,7 @@ pub fn update_flotsam(
     mut commands: Commands,
     time: Res<Time>,
     assets: Res<GameAssets>,
+    sounds: Res<crate::audio::SoundBank>,
     mut stats: ResMut<GameStats>,
     mut flotsam: Query<(Entity, &mut Flotsam, &mut Transform), Without<Ship>>,
     mut players: Query<
@@ -84,6 +85,7 @@ pub fn update_flotsam(
         }
         if distance < COLLECT_RANGE {
             collect(&mut commands, &assets, &mut stats, *ship_entity, voxels);
+            crate::audio::play(&mut commands, &sounds.ding, 0.45);
             commands.entity(entity).despawn();
         }
     }
@@ -185,6 +187,7 @@ fn weathered(
 pub fn upgrade_player(
     mut commands: Commands,
     assets: Res<GameAssets>,
+    sounds: Res<crate::audio::SoundBank>,
     mut stats: ResMut<GameStats>,
     players: Query<(Entity, &Transform, &Ship), (With<PlayerShip>, Without<Sinking>)>,
 ) {
@@ -213,4 +216,5 @@ pub fn upgrade_player(
         PLAYER_CLASSES[stats.tier].name
     );
     stats.announce(message);
+    crate::audio::play(&mut commands, &sounds.fanfare, 0.6);
 }

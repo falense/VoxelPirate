@@ -98,6 +98,7 @@ pub fn fire_cannons(
     mut commands: Commands,
     time: Res<Time>,
     assets: Res<GameAssets>,
+    sounds: Res<crate::audio::SoundBank>,
     mut ships: Query<(Entity, &Ship, &Transform, &ShipVoxels, &mut Broadsides), Without<Sinking>>,
 ) {
     let dt = time.delta_secs();
@@ -142,6 +143,22 @@ pub fn fire_cannons(
                 0.4,
                 1.6,
             );
+            // Brief muzzle flash; update_effects despawns it with the smoke.
+            commands.spawn((
+                Effect {
+                    age: 0.0,
+                    life: 0.12,
+                    from_scale: 1.0,
+                    to_scale: 1.0,
+                },
+                PointLight {
+                    color: Color::srgb(1.0, 0.72, 0.35),
+                    intensity: 600_000.0,
+                    range: 16.0,
+                    ..default()
+                },
+                Transform::from_translation(muzzle + dir * 0.6),
+            ));
             if port_side {
                 fired_port = true;
             } else {
@@ -154,6 +171,9 @@ pub fn fire_cannons(
         if fired_starboard {
             guns.reload_starboard = guns.reload_time;
         }
+        if fired_port || fired_starboard {
+            crate::audio::play(&mut commands, &sounds.boom, 0.5);
+        }
     }
 }
 
@@ -165,6 +185,7 @@ pub fn update_cannonballs(
     mut commands: Commands,
     time: Res<Time>,
     assets: Res<GameAssets>,
+    sounds: Res<crate::audio::SoundBank>,
     mut stats: ResMut<GameStats>,
     mut balls: Query<(Entity, &mut CannonBall, &mut Transform), Without<Ship>>,
     mut ships: Query<
@@ -238,6 +259,7 @@ pub fn update_cannonballs(
                     0.5,
                     2.4,
                 );
+                crate::audio::play(&mut commands, &sounds.crunch, 0.7);
 
                 let lost = voxels.initial_count - voxels.blocks.len();
                 if lost as f32 >= voxels.initial_count as f32 * SINK_LOSS_FRACTION {
@@ -279,6 +301,7 @@ pub fn update_cannonballs(
                     0.4,
                     2.0,
                 );
+                crate::audio::play(&mut commands, &sounds.splash, 0.25);
                 commands.entity(ball_entity).despawn();
                 continue 'balls;
             }

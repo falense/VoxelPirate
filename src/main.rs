@@ -1,8 +1,9 @@
-// Bevy system signatures routinely trip clippy's type_complexity lint;
-// allowing it crate-wide is the upstream-recommended practice.
-#![allow(clippy::type_complexity)]
+// Bevy system signatures routinely trip clippy's type_complexity and
+// too_many_arguments lints; allowing them crate-wide is upstream practice.
+#![allow(clippy::type_complexity, clippy::too_many_arguments)]
 
 mod assets;
+mod audio;
 mod blocks;
 mod combat;
 mod enemy;
@@ -12,6 +13,7 @@ mod salvage;
 mod ship;
 
 use bevy::input::mouse::AccumulatedMouseScroll;
+use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::prelude::*;
 
 use ship::PlayerShip;
@@ -29,10 +31,12 @@ fn main() {
         .init_resource::<combat::GameStats>()
         .init_resource::<enemy::FleetDirector>()
         .init_resource::<salvage::DerelictDirector>()
+        .init_resource::<ocean::Wind>()
         .add_systems(
             Startup,
             (
                 assets::setup_assets,
+                audio::setup_sounds,
                 setup_scene,
                 ocean::spawn_ocean,
                 ship::spawn_player_start,
@@ -44,7 +48,13 @@ fn main() {
             Update,
             (
                 (ship::player_helm, ship::player_fire_mouse, enemy::enemy_ai).chain(),
-                (ship::drive_ships, ship::separate_ships, ship::float_ships).chain(),
+                (
+                    ocean::update_wind,
+                    ship::drive_ships,
+                    ship::separate_ships,
+                    ship::float_ships,
+                )
+                    .chain(),
                 (
                     combat::fire_cannons,
                     combat::update_cannonballs,
@@ -78,6 +88,16 @@ fn setup_scene(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(-16.0, 9.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
+        // Haze the horizon into the sky so the finite ocean plane never
+        // shows an edge.
+        DistanceFog {
+            color: Color::srgb(0.55, 0.75, 0.90),
+            falloff: FogFalloff::Linear {
+                start: 90.0,
+                end: 220.0,
+            },
+            ..default()
+        },
     ));
     commands.spawn((
         DirectionalLight {
