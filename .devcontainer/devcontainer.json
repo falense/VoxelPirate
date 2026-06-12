@@ -12,9 +12,7 @@
   "runArgs": [
     "--cap-add=NET_ADMIN",
     "--cap-add=NET_RAW",
-    "--device=/dev/dri",
-    "--env-file",
-    ".devcontainer/devcontainer.env"
+    "--device=/dev/dri"
   ],
   "customizations": {
     "vscode": {
@@ -59,6 +57,5 @@
   },
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
   "workspaceFolder": "/workspace",
-  "initializeCommand": ".devcontainer/create-env.sh",
   "postCreateCommand": "sudo /usr/local/bin/init-firewall.sh"
 }

@@ -115,11 +115,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --de
   && /home/node/.cargo/bin/rustup component add clippy rustfmt
 ENV PATH="/home/node/.cargo/bin:$PATH"
 
-# Install AWS CLI
-RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-RUN unzip awscliv2.zip
 USER root
-RUN ./aws/install
 
 # Install Claude Squad
 RUN curl -fsSL https://raw.githubusercontent.com/smtg-ai/claude-squad/main/install.sh | bash
