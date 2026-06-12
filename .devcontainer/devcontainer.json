@@ -14,7 +14,11 @@
   "runArgs": [
     "--cap-add=NET_ADMIN",
     "--cap-add=NET_RAW",
-    "--device=/dev/dri"
+    "--device=/dev/dri",
+    // GPU device access: card* is group video (44), renderD* is the host's
+    // render group (gid 110 on this machine — check ls -ln /dev/dri).
+    "--group-add=video",
+    "--group-add=110"
   ],
   "customizations": {
     "vscode": {
@@ -59,5 +63,5 @@
   },
   "workspaceMount": "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind,consistency=delegated",
   "workspaceFolder": "${localWorkspaceFolder}",
-  "postCreateCommand": "sudo /usr/local/bin/init-firewall.sh"
+  "postCreateCommand": "sudo chown -R \"$(id -u):$(id -g)\" \"$HOME/.cargo/registry\" ./target && sudo /usr/local/bin/init-firewall.sh"
 }
