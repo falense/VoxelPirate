@@ -88,6 +88,7 @@ pub fn setup_hud(mut commands: Commands) {
 
 pub fn update_hud(
     time: Res<Time>,
+    virtual_time: Res<Time<Virtual>>,
     mode: Res<crate::build::PlayMode>,
     build_state: Res<crate::build::BuildState>,
     mut stats: ResMut<GameStats>,
@@ -106,7 +107,7 @@ pub fn update_hud(
             crate::build::PlayMode::Build => {
                 let def = crate::blocks::def(build_state.selected);
                 format!(
-                    "BUILD MODE — 1-6 select block  ·  click place ({} costs {})  ·  right-click remove (refund)  ·  Tab: sail",
+                    "BUILD MODE — 1-7 select block  ·  click place ({} costs {})  ·  right-click remove (refund)  ·  Tab: sail",
                     def.name, def.cost,
                 )
             }
@@ -124,21 +125,28 @@ pub fn update_hud(
         } else {
             format!("Salvage {}", stats.salvage)
         };
+        let crown = if stats.victory {
+            "   ☠ Dreadnought defeated"
+        } else {
+            ""
+        };
         if let Ok((voxels, guns)) = players.single() {
             let hull = (1.0 - voxels.damage_fraction()) * 100.0;
             text.0 = format!(
-                "{}   Hull {hull:.0}%   Port {}   Starboard {}   {salvage}   Ships sunk: {}",
+                "{}   Hull {hull:.0}%   Port {}   Starboard {}   {salvage}   Ships sunk: {}{crown}",
                 PLAYER_CLASSES[stats.tier].name,
                 reload_label(guns.reload_port),
                 reload_label(guns.reload_starboard),
                 stats.kills,
             );
         } else {
-            text.0 = format!("{salvage}   Ships sunk: {}", stats.kills);
+            text.0 = format!("{salvage}   Ships sunk: {}{crown}", stats.kills);
         }
     }
     if let Ok(mut text) = center.single_mut() {
-        text.0 = if stats.player_sunk {
+        text.0 = if virtual_time.is_paused() {
+            "PAUSED — P to resume".into()
+        } else if stats.player_sunk {
             "Your ship went down!  Press R to set sail again".into()
         } else if stats.announce_ttl > 0.0 {
             stats.announcement.clone()

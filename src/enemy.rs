@@ -16,12 +16,20 @@ const FIRE_RANGE: f32 = 22.0;
 #[derive(Component)]
 pub struct EnemyAi;
 
+/// The boss ship; sinking it is the campaign's victory condition.
+#[derive(Component)]
+pub struct Dreadnought;
+
+/// Player kill count that summons the Dreadnought.
+const BOSS_AT_KILLS: u32 = 15;
+
 #[derive(Resource, Default)]
 pub struct FleetDirector {
     spawned: u32,
     /// Highest class index already announced, so each new hostile type gets
     /// one "sighted!" call-out.
     announced: usize,
+    boss_spawned: bool,
 }
 
 /// Hostile classes. Enemies reload slower and sail slower than the player's
@@ -77,14 +85,36 @@ pub fn maintain_fleet(
     if time.elapsed_secs() < 12.0 {
         return;
     }
+    let Ok(player) = players.single() else {
+        return;
+    };
+
+    // The hunt's climax: one Dreadnought, summoned at BOSS_AT_KILLS.
+    if stats.kills >= BOSS_AT_KILLS && !director.boss_spawned && !stats.victory {
+        director.boss_spawned = true;
+        director.spawned += 1;
+        let bearing = director.spawned as f32 * 2.399963;
+        let offset = Vec3::new(bearing.cos(), 0.0, bearing.sin()) * (SPAWN_DISTANCE + 20.0);
+        let position = (player.translation + offset).with_y(0.0);
+        let to_player = player.translation - position;
+        let boss = ship::spawn_ship(
+            &mut commands,
+            &assets,
+            ship::dreadnought_layout(),
+            position,
+            (-to_player.z).atan2(to_player.x),
+            5.0,
+            4.6,
+        );
+        commands.entity(boss).insert((EnemyAi, Dreadnought));
+        stats.announce("The DREADNOUGHT has come for you. Sink it and the seas are yours!");
+    }
+
     let target_fleet = (2 + stats.kills as usize / 5).min(4);
     let alive = enemies.iter().count();
     if alive >= target_fleet {
         return;
     }
-    let Ok(player) = players.single() else {
-        return;
-    };
     for _ in alive..target_fleet {
         director.spawned += 1;
         let unlocked: Vec<(usize, &EnemyClass)> = ENEMY_CLASSES

@@ -58,5 +58,9 @@ preference the user would have wanted to make.
    greedy meshing still pending if per-cube entities get slow
 4. ✅ Cannons that fire and damage other ships' voxel grids (Q/E broadsides,
    blast damage with debris, sinking, AI sloops in an endless skirmish loop)
-5. Enemy/derelict vessels to scavenge; material tiers (AI vessels exist;
-   scavenging is parked in `DECISIONS.md`)
+5. ✅ Enemy/derelict vessels to scavenge (flotsam economy, decision A);
+   material tiers (oak/iron) and a Dreadnought boss with victory condition
+
+Next ideas: structural connectivity (cut-off blocks break away), real
+buoyancy (roadmap 2), boarding/stripping disabled ships (decision B),
+greedy meshing, gamepad support.

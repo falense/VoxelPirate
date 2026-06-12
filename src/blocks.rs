@@ -12,17 +12,19 @@ pub enum BlockId {
     Mast,
     Sail,
     Cannon,
+    Gold,
 }
 
 /// Every block id, for systems that need to pre-build per-block assets.
 /// Keep in sync with [`BlockId`] when adding blocks.
-pub const ALL: [BlockId; 6] = [
+pub const ALL: [BlockId; 7] = [
     BlockId::OakHull,
     BlockId::IronHull,
     BlockId::OakDeck,
     BlockId::Mast,
     BlockId::Sail,
     BlockId::Cannon,
+    BlockId::Gold,
 ];
 
 /// Static properties of a block type. Mass feeds into buoyancy and handling
@@ -81,6 +83,13 @@ pub fn def(id: BlockId) -> BlockDef {
             color: Color::srgb(0.15, 0.15, 0.17),
             gun: true,
             cost: 8,
+        },
+        BlockId::Gold => BlockDef {
+            name: "Gold Plunder",
+            mass: 60.0,
+            color: Color::srgb(0.95, 0.78, 0.22),
+            gun: false,
+            cost: 5,
         },
     }
 }

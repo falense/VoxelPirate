@@ -17,17 +17,14 @@ Format per entry:
 
 ## Open
 
-## Scavenging mechanic shape — parked 2026-06-12
-**Blocked work:** Roadmap item 5 (grow your ship by scavenging defeated vessels)
-**Options:**
-- A: Sunk ships scatter floating loot blocks you sail over to collect —
-  simple, keeps the action at sea, works with today's systems
-- B: Ships get a "disabled" damage state (guns gone but afloat) and you pull
-  alongside to strip them block-by-block — richer and more piratey, but needs
-  block placement (roadmap item 3) and a build cursor first
-**Recommendation:** A now, evolve toward B once block placement lands.
+(none)
 
 ## Resolved
+
+- **Scavenging mechanic shape** — Option A (sunk ships scatter floating
+  flotsam you sail over to collect), chosen by Sondre 2026-06-13. Option B
+  (boarding/stripping disabled ships) remains a possible later evolution now
+  that block placement exists.
 
 - **Engine/stack** — Bevy 0.18 (Rust), chosen 2026-06-12 over Godot+GDScript
   and TypeScript+Babylon.js; no-C# constraint, agent-friendly compiler loop.

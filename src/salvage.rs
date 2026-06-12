@@ -12,9 +12,11 @@ const MAGNET_RANGE: f32 = 9.0;
 const MAGNET_PULL: f32 = 7.0;
 
 /// A block bobbing on the sea after a ship went down. Sail over it to
-/// collect: it repairs battle damage first, then banks as salvage.
+/// collect: it repairs battle damage first, then banks salvage worth the
+/// block's registry cost — a scavenged cannon is a prize.
 #[derive(Component)]
 pub struct Flotsam {
+    id: BlockId,
     age: f32,
     phase: f32,
 }
@@ -38,6 +40,7 @@ const DERELICT_LEASH: f32 = 220.0;
 pub fn spawn_flotsam(commands: &mut Commands, assets: &GameAssets, id: BlockId, position: Vec3) {
     commands.spawn((
         Flotsam {
+            id,
             age: 0.0,
             phase: position.x * 3.1 + position.z * 1.7,
         },
@@ -84,7 +87,14 @@ pub fn update_flotsam(
             transform.translation += to_ship / distance * (MAGNET_PULL * dt);
         }
         if distance < COLLECT_RANGE {
-            collect(&mut commands, &assets, &mut stats, *ship_entity, voxels);
+            collect(
+                &mut commands,
+                &assets,
+                &mut stats,
+                *ship_entity,
+                voxels,
+                piece.id,
+            );
             crate::audio::play(&mut commands, &sounds.ding, 0.45);
             commands.entity(entity).despawn();
         }
@@ -92,13 +102,15 @@ pub fn update_flotsam(
 }
 
 /// One collected piece repairs the lowest missing cell of the ship's plan
-/// (hull before superstructure); with nothing to repair it banks as salvage.
+/// (hull before superstructure); with nothing to repair it banks salvage
+/// worth the piece's registry cost.
 fn collect(
     commands: &mut Commands,
     assets: &GameAssets,
     stats: &mut GameStats,
     ship_entity: Entity,
     voxels: &mut ShipVoxels,
+    piece_id: BlockId,
 ) {
     let missing = voxels
         .plan
@@ -118,7 +130,7 @@ fn collect(
             .id();
         voxels.blocks.insert(cell, Voxel { id, entity: child });
     } else {
-        stats.salvage += 1;
+        stats.salvage += crate::blocks::def(piece_id).cost;
     }
 }
 

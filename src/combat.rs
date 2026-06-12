@@ -27,6 +27,8 @@ pub struct GameStats {
     /// Index into ship::PLAYER_CLASSES — survives death.
     pub tier: usize,
     pub player_sunk: bool,
+    /// The Dreadnought has been sent to the bottom.
+    pub victory: bool,
     pub announcement: String,
     pub announce_ttl: f32,
 }
@@ -35,6 +37,31 @@ impl GameStats {
     pub fn announce(&mut self, message: impl Into<String>) {
         self.announcement = message.into();
         self.announce_ttl = 4.0;
+    }
+}
+
+/// Bookkeeping when a ship starts going down, shared by cannon fire and
+/// ramming. `player_credit` is whether the player dealt the killing blow.
+pub fn record_sunk(
+    stats: &mut GameStats,
+    is_player: bool,
+    is_derelict: bool,
+    is_boss: bool,
+    player_credit: bool,
+) {
+    if is_player {
+        stats.player_sunk = true;
+    } else if is_derelict {
+        stats.announce("Derelict broke apart — salvage adrift!");
+    } else {
+        if player_credit {
+            stats.kills += 1;
+        }
+        if is_boss {
+            stats.victory = true;
+            stats.announcement = "VICTORY — the Dreadnought is sunk! The seas are yours.".into();
+            stats.announce_ttl = 12.0;
+        }
     }
 }
 
@@ -195,6 +222,7 @@ pub fn update_cannonballs(
             &mut ShipVoxels,
             Has<PlayerShip>,
             Has<crate::salvage::Derelict>,
+            Has<crate::enemy::Dreadnought>,
         ),
         (With<Ship>, Without<Sinking>),
     >,
@@ -215,7 +243,9 @@ pub fn update_cannonballs(
         for i in 1..=substeps {
             let point = ball_transform.translation + step * (i as f32 / substeps as f32);
 
-            for (ship_entity, ship_transform, mut voxels, is_player, is_derelict) in &mut ships {
+            for (ship_entity, ship_transform, mut voxels, is_player, is_derelict, is_boss) in
+                &mut ships
+            {
                 if ship_entity == ball.shooter || newly_sunk.contains(&ship_entity) {
                     continue;
                 }
@@ -229,27 +259,15 @@ pub fn update_cannonballs(
                     continue;
                 }
 
-                let blasted: Vec<IVec3> = voxels
-                    .blocks
-                    .keys()
-                    .filter(|c| (**c - cell).as_vec3().length() <= BLAST_RADIUS)
-                    .copied()
-                    .collect();
-                for c in blasted {
-                    let voxel = voxels.blocks.remove(&c).unwrap();
-                    commands.entity(voxel.entity).despawn();
-                    let world = voxels.grid_to_world(ship_transform, c);
-                    commands.spawn((
-                        Debris {
-                            velocity: jitter(world) * 2.5 + Vec3::Y * 2.0 + ball.velocity * 0.15,
-                            spin: jitter(world + Vec3::splat(31.7)) * 6.0,
-                            age: 0.0,
-                        },
-                        Mesh3d(assets.cube.clone()),
-                        MeshMaterial3d(assets.block_materials[&voxel.id].clone()),
-                        Transform::from_translation(world).with_scale(Vec3::splat(0.85)),
-                    ));
-                }
+                let sank = apply_blast(
+                    &mut commands,
+                    &assets,
+                    &mut voxels,
+                    ship_transform,
+                    cell,
+                    BLAST_RADIUS,
+                    ball.velocity * 0.15,
+                );
                 spawn_effect(
                     &mut commands,
                     &assets,
@@ -261,29 +279,16 @@ pub fn update_cannonballs(
                 );
                 crate::audio::play(&mut commands, &sounds.crunch, 0.7);
 
-                if voxels.damage_fraction() >= SINK_LOSS_FRACTION {
+                if sank {
                     newly_sunk.insert(ship_entity);
-                    commands.entity(ship_entity).insert(Sinking { age: 0.0 });
-                    if is_player {
-                        stats.player_sunk = true;
-                    } else if is_derelict {
-                        stats.announce("Derelict broke apart — salvage adrift!");
-                    } else if player_shooters.contains(ball.shooter) {
-                        stats.kills += 1;
-                    }
-                    // A share of the wreck bobs up as collectible flotsam.
-                    for (count, (cell, voxel)) in voxels.blocks.iter().step_by(3).enumerate() {
-                        if count >= 10 {
-                            break;
-                        }
-                        let world = voxels.grid_to_world(ship_transform, *cell);
-                        crate::salvage::spawn_flotsam(
-                            &mut commands,
-                            &assets,
-                            voxel.id,
-                            Vec3::new(world.x, 0.15, world.z),
-                        );
-                    }
+                    start_sinking(&mut commands, &assets, ship_entity, ship_transform, &voxels);
+                    record_sunk(
+                        &mut stats,
+                        is_player,
+                        is_derelict,
+                        is_boss,
+                        player_shooters.contains(ball.shooter),
+                    );
                 }
 
                 commands.entity(ball_entity).despawn();
@@ -368,6 +373,71 @@ pub fn sink_ships(
             commands.entity(entity).despawn();
         }
     }
+}
+
+/// Blast every block within `radius` cells of the impact cell off the grid
+/// as tumbling debris. Returns whether the ship has now taken fatal damage.
+pub fn apply_blast(
+    commands: &mut Commands,
+    assets: &GameAssets,
+    voxels: &mut ShipVoxels,
+    ship_transform: &Transform,
+    center_cell: IVec3,
+    radius: f32,
+    kick: Vec3,
+) -> bool {
+    let blasted: Vec<IVec3> = voxels
+        .blocks
+        .keys()
+        .filter(|c| (**c - center_cell).as_vec3().length() <= radius)
+        .copied()
+        .collect();
+    for cell in blasted {
+        let voxel = voxels.blocks.remove(&cell).unwrap();
+        commands.entity(voxel.entity).despawn();
+        let world = voxels.grid_to_world(ship_transform, cell);
+        commands.spawn((
+            Debris {
+                velocity: jitter(world) * 2.5 + Vec3::Y * 2.0 + kick,
+                spin: jitter(world + Vec3::splat(31.7)) * 6.0,
+                age: 0.0,
+            },
+            Mesh3d(assets.cube.clone()),
+            MeshMaterial3d(assets.block_materials[&voxel.id].clone()),
+            Transform::from_translation(world).with_scale(Vec3::splat(0.85)),
+        ));
+    }
+    voxels.damage_fraction() >= SINK_LOSS_FRACTION
+}
+
+/// Mark a ship as going down and bob part of the wreck up as flotsam,
+/// plus one chest of gold plunder.
+pub fn start_sinking(
+    commands: &mut Commands,
+    assets: &GameAssets,
+    ship_entity: Entity,
+    ship_transform: &Transform,
+    voxels: &ShipVoxels,
+) {
+    commands.entity(ship_entity).insert(Sinking { age: 0.0 });
+    for (count, (cell, voxel)) in voxels.blocks.iter().step_by(3).enumerate() {
+        if count >= 10 {
+            break;
+        }
+        let world = voxels.grid_to_world(ship_transform, *cell);
+        crate::salvage::spawn_flotsam(
+            commands,
+            assets,
+            voxel.id,
+            Vec3::new(world.x, 0.15, world.z),
+        );
+    }
+    crate::salvage::spawn_flotsam(
+        commands,
+        assets,
+        blocks::BlockId::Gold,
+        ship_transform.translation.with_y(0.15),
+    );
 }
 
 fn spawn_effect(

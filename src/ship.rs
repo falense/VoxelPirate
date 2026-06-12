@@ -112,8 +112,9 @@ pub const PLAYER_CLASSES: [ShipClass; 4] = [
     },
 ];
 
-/// Salvage cost to step from tier i to tier i + 1.
-pub const UPGRADE_COSTS: [u32; 3] = [12, 30, 60];
+/// Salvage cost to step from tier i to tier i + 1. Tuned against flotsam
+/// values: a fully scavenged kill yields roughly 15-25 salvage.
+pub const UPGRADE_COSTS: [u32; 3] = [20, 60, 140];
 
 /// Spawn a ship from a block layout. The grid is centered on its footprint
 /// so the hull rolls about its midpoint; grid y = 1 sits on the waterline.
@@ -248,6 +249,18 @@ pub fn sloop_layout() -> HashMap<IVec3, BlockId> {
     hull_layout(7, 3, BlockId::OakHull, &[3], 4, &[1, 5])
 }
 
+/// The boss: a 20x8 iron monster with seven cannons per side.
+pub fn dreadnought_layout() -> HashMap<IVec3, BlockId> {
+    hull_layout(
+        20,
+        8,
+        BlockId::IronHull,
+        &[3, 8, 13, 17],
+        7,
+        &[1, 4, 7, 10, 13, 16, 18],
+    )
+}
+
 /// Spawn the player's ship for the given upgrade tier.
 pub fn spawn_player(
     commands: &mut Commands,
@@ -270,8 +283,8 @@ pub fn spawn_player(
     ship
 }
 
-pub fn spawn_player_start(mut commands: Commands, assets: Res<GameAssets>) {
-    spawn_player(&mut commands, &assets, 0, Vec3::ZERO, 0.0);
+pub fn spawn_player_start(mut commands: Commands, assets: Res<GameAssets>, stats: Res<GameStats>) {
+    spawn_player(&mut commands, &assets, stats.tier, Vec3::ZERO, 0.0);
 }
 
 /// WASD steers; Q/E fire broadsides for keyboard-only play (the primary
@@ -364,21 +377,118 @@ pub fn drive_ships(
     }
 }
 
-/// Coarse collision between hulls: when two ships' bounding circles overlap
-/// they shoulder each other apart instead of interpenetrating.
-pub fn separate_ships(mut ships: Query<(&ShipVoxels, &mut Transform), Without<Sinking>>) {
+/// Coarse collision between hulls: overlapping ships shoulder each other
+/// apart, and a hard closing contact is a ram — both hulls splinter at the
+/// contact point and lose way.
+pub fn separate_ships(
+    mut commands: Commands,
+    assets: Res<GameAssets>,
+    sounds: Res<crate::audio::SoundBank>,
+    mut stats: ResMut<GameStats>,
+    mut ships: Query<
+        (
+            Entity,
+            &mut Ship,
+            &mut ShipVoxels,
+            &mut Transform,
+            Has<PlayerShip>,
+            Has<crate::salvage::Derelict>,
+            Has<crate::enemy::Dreadnought>,
+        ),
+        Without<Sinking>,
+    >,
+) {
     let mut pairs = ships.iter_combinations_mut();
-    while let Some([(voxels_a, mut a), (voxels_b, mut b)]) = pairs.fetch_next() {
+    while let Some(
+        [
+            (entity_a, mut ship_a, mut voxels_a, mut a, player_a, derelict_a, boss_a),
+            (entity_b, mut ship_b, mut voxels_b, mut b, player_b, derelict_b, boss_b),
+        ],
+    ) = pairs.fetch_next()
+    {
         let mut delta = b.translation - a.translation;
         delta.y = 0.0;
         let distance = delta.length();
         // Circles overstate long narrow hulls; allow some overlap.
         let min_distance = (voxels_a.radius + voxels_b.radius) * 0.7;
-        if distance < min_distance && distance > 0.001 {
-            let push = delta / distance * ((min_distance - distance) * 0.5);
-            a.translation -= push;
-            b.translation += push;
+        if distance >= min_distance || distance <= 0.001 {
+            continue;
         }
+        let direction = delta / distance;
+        let push = direction * ((min_distance - distance) * 0.5);
+        a.translation -= push;
+        b.translation += push;
+
+        let velocity_a = Quat::from_rotation_y(ship_a.yaw) * Vec3::X * ship_a.speed;
+        let velocity_b = Quat::from_rotation_y(ship_b.yaw) * Vec3::X * ship_b.speed;
+        let closing = (velocity_a - velocity_b).dot(direction);
+        if closing < 2.5 {
+            continue;
+        }
+
+        // Ram: splinter both hulls where they meet and kill most of the way.
+        let contact = (a.translation + b.translation) * 0.5;
+        crate::audio::play(&mut commands, &sounds.crunch, 0.9);
+        ship_a.speed *= 0.4;
+        ship_b.speed *= 0.4;
+        let mut ram = |voxels: &mut ShipVoxels,
+                       transform: &Transform,
+                       entity: Entity,
+                       kick: Vec3,
+                       is_player: bool,
+                       is_derelict: bool,
+                       is_boss: bool,
+                       credit: bool| {
+            let near_cell = voxels.world_to_grid(transform, contact);
+            let target = voxels
+                .blocks
+                .keys()
+                .min_by(|x, y| {
+                    let dx = (**x - near_cell).as_vec3().length_squared();
+                    let dy = (**y - near_cell).as_vec3().length_squared();
+                    dx.total_cmp(&dy)
+                })
+                .copied();
+            let Some(cell) = target else {
+                return;
+            };
+            if (cell - near_cell).as_vec3().length() > 3.0 {
+                return;
+            }
+            let sank = crate::combat::apply_blast(
+                &mut commands,
+                &assets,
+                voxels,
+                transform,
+                cell,
+                1.3,
+                kick,
+            );
+            if sank {
+                crate::combat::start_sinking(&mut commands, &assets, entity, transform, voxels);
+                crate::combat::record_sunk(&mut stats, is_player, is_derelict, is_boss, credit);
+            }
+        };
+        ram(
+            &mut voxels_a,
+            &a,
+            entity_a,
+            -direction * 2.0,
+            player_a,
+            derelict_a,
+            boss_a,
+            player_b,
+        );
+        ram(
+            &mut voxels_b,
+            &b,
+            entity_b,
+            direction * 2.0,
+            player_b,
+            derelict_b,
+            boss_b,
+            player_a,
+        );
     }
 }
 

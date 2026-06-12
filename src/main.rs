@@ -25,6 +25,13 @@ fn main() {
     if std::env::args().any(|arg| arg == "--selftest") {
         app.init_resource::<selftest::SelfTest>();
     }
+    let mut stats = combat::GameStats::default();
+    // Dev shortcut: start on the boss's doorstep with a frigate-tier ship.
+    if std::env::args().any(|arg| arg == "--boss") {
+        stats.kills = 15;
+        stats.tier = 2;
+    }
+    app.insert_resource(stats);
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
             title: "VoxelPirates".into(),
@@ -33,7 +40,6 @@ fn main() {
         ..default()
     }))
     .insert_resource(ClearColor(Color::srgb(0.55, 0.75, 0.90)))
-    .init_resource::<combat::GameStats>()
     .init_resource::<enemy::FleetDirector>()
     .init_resource::<salvage::DerelictDirector>()
     .init_resource::<ocean::Wind>()
@@ -57,6 +63,7 @@ fn main() {
         (
             (
                 selftest::run_selftest.run_if(resource_exists::<selftest::SelfTest>),
+                toggle_pause,
                 build::toggle_mode,
                 ship::player_helm,
                 ship::player_fire_mouse,
@@ -98,6 +105,18 @@ fn main() {
             .chain(),
     )
     .run();
+}
+
+/// P pauses the virtual clock; every gameplay system reads Time, so the
+/// whole battle freezes in place.
+fn toggle_pause(keys: Res<ButtonInput<KeyCode>>, mut time: ResMut<Time<Virtual>>) {
+    if keys.just_pressed(KeyCode::KeyP) {
+        if time.is_paused() {
+            time.unpause();
+        } else {
+            time.pause();
+        }
+    }
 }
 
 fn setup_scene(mut commands: Commands) {
