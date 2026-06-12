@@ -5,6 +5,16 @@ ENV TZ="$TZ"
 
 ARG CLAUDE_CODE_VERSION=latest
 
+# Match the host user and workspace path so bind mounts (~/.claude, the repo)
+# line up on username, uid/gid, and absolute paths — Claude Code auth and
+# project identity key off these. Both args are passed from the host
+# environment in devcontainer.json. node:20's "node" user already owns
+# uid/gid 1000, so rename it rather than creating a second user.
+ARG USERNAME=sondre
+ARG WORKSPACE_DIR=/workspace
+RUN usermod -l "$USERNAME" -d "/home/$USERNAME" -m node && \
+  groupmod -n "$USERNAME" node
+
 # Install basic development tools and iptables/ipset
 RUN apt-get update && apt-get install -y --no-install-recommends \
   less \
@@ -52,26 +62,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   libwayland-dev \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Ensure default node user has access to /usr/local/share
+# Ensure default user has access to /usr/local/share
 RUN mkdir -p /usr/local/share/npm-global && \
-  chown -R node:node /usr/local/share
-
-ARG USERNAME=node
+  chown -R "$USERNAME:$USERNAME" /usr/local/share
 
 # Persist bash history.
 RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \
   && mkdir /commandhistory \
   && touch /commandhistory/.bash_history \
-  && chown -R $USERNAME /commandhistory
+  && chown -R "$USERNAME" /commandhistory
 
 # Set `DEVCONTAINER` environment variable to help with orientation
 ENV DEVCONTAINER=true
 
 # Create workspace and config directories and set permissions
-RUN mkdir -p /workspace /home/node/.claude && \
-  chown -R node:node /workspace /home/node/.claude
+RUN mkdir -p "$WORKSPACE_DIR" "/home/$USERNAME/.claude" && \
+  chown -R "$USERNAME:$USERNAME" "$WORKSPACE_DIR" "/home/$USERNAME/.claude"
 
-WORKDIR /workspace
+WORKDIR $WORKSPACE_DIR
 
 ARG GIT_DELTA_VERSION=0.18.2
 RUN ARCH=$(dpkg --print-architecture) && \
@@ -80,7 +88,7 @@ RUN ARCH=$(dpkg --print-architecture) && \
   rm "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb"
 
 # Set up non-root user
-USER node
+USER $USERNAME
 
 # Install global packages
 ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
@@ -90,8 +98,8 @@ ENV PATH=$PATH:/usr/local/share/npm-global/bin
 ENV SHELL=/bin/zsh
 
 # Set the default editor and visual
-ENV EDITOR nano
-ENV VISUAL nano
+ENV EDITOR=nano
+ENV VISUAL=nano
 
 # Default powerline10k theme
 ARG ZSH_IN_DOCKER_VERSION=1.2.0
@@ -108,12 +116,12 @@ RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
 # Install UV (Python package manager)
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/home/node/.local/bin:$PATH"
+ENV PATH="/home/${USERNAME}/.local/bin:$PATH"
 
-# Install Rust toolchain (rustup) for the node user
+# Install Rust toolchain (rustup)
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal \
-  && /home/node/.cargo/bin/rustup component add clippy rustfmt
-ENV PATH="/home/node/.cargo/bin:$PATH"
+  && "/home/$USERNAME/.cargo/bin/rustup" component add clippy rustfmt
+ENV PATH="/home/${USERNAME}/.cargo/bin:$PATH"
 
 USER root
 
@@ -125,10 +133,11 @@ RUN cp /root/.local/bin/cs /usr/local/bin/cs && chmod +x /usr/local/bin/cs
 COPY init-firewall.sh /usr/local/bin/
 USER root
 RUN chmod +x /usr/local/bin/init-firewall.sh && \
-  echo "node ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh" > /etc/sudoers.d/node-firewall && \
-  chmod 0440 /etc/sudoers.d/node-firewall
+  echo "$USERNAME ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh" > "/etc/sudoers.d/$USERNAME-firewall" && \
+  chmod 0440 "/etc/sudoers.d/$USERNAME-firewall"
 
-# Add node user to sudoers
-RUN echo "node ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/node && \
-  chmod 0440 /etc/sudoers.d/node
+# Add user to sudoers
+RUN echo "$USERNAME ALL=(ALL) NOPASSWD: ALL" > "/etc/sudoers.d/$USERNAME" && \
+  chmod 0440 "/etc/sudoers.d/$USERNAME"
 
+USER $USERNAME

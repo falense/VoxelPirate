@@ -6,7 +6,9 @@
       "TZ": "${localEnv:TZ:Europe/Oslo}",
       "CLAUDE_CODE_VERSION": "latest",
       "GIT_DELTA_VERSION": "0.18.2",
-      "ZSH_IN_DOCKER_VERSION": "1.2.0"
+      "ZSH_IN_DOCKER_VERSION": "1.2.0",
+      "USERNAME": "${localEnv:USER}",
+      "WORKSPACE_DIR": "${localWorkspaceFolder}"
     }
   },
   "runArgs": [
@@ -40,12 +42,12 @@
       }
     }
   },
-  "remoteUser": "node",
+  "remoteUser": "${localEnv:USER}",
   "mounts": [
     "source=claude-code-bashhistory-${devcontainerId},target=/commandhistory,type=volume",
     "source=${localEnv:HOME}/.claude,target=${localEnv:HOME}/.claude,type=bind",
-    "source=craftpirate-cargo-registry,target=/home/node/.cargo/registry,type=volume",
-    "source=craftpirate-target,target=/workspace/target,type=volume",
+    "source=craftpirate-cargo-registry,target=${localEnv:HOME}/.cargo/registry,type=volume",
+    "source=craftpirate-target,target=${localWorkspaceFolder}/target,type=volume",
     "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind"
   ],
   "containerEnv": {
@@ -55,7 +57,7 @@
     "DISPLAY": "${localEnv:DISPLAY::0}",
     "WINIT_UNIX_BACKEND": "x11"
   },
-  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
-  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind,consistency=delegated",
+  "workspaceFolder": "${localWorkspaceFolder}",
   "postCreateCommand": "sudo /usr/local/bin/init-firewall.sh"
 }
