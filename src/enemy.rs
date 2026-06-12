@@ -146,6 +146,90 @@ pub fn maintain_fleet(
     }
 }
 
+/// `--demo` flag: the player's ship sails itself with the same broadside
+/// AI, for end-to-end pacing tests (kills, salvage, upgrades, boss).
+#[derive(Resource, Default)]
+pub struct DemoMode;
+
+pub fn demo_pilot(
+    mut commands: Commands,
+    assets: Res<GameAssets>,
+    mut stats: ResMut<GameStats>,
+    targets: Query<&Transform, (With<EnemyAi>, Without<Sinking>, Without<PlayerShip>)>,
+    mut players: Query<
+        (&Transform, &Ship, &mut Helm, &mut Broadsides),
+        (With<PlayerShip>, Without<Sinking>, Without<EnemyAi>),
+    >,
+    any_player: Query<(), With<PlayerShip>>,
+) {
+    // Auto-relaunch after going down, like a player pressing R.
+    if any_player.is_empty() {
+        ship::spawn_player(&mut commands, &assets, stats.tier, Vec3::ZERO, 0.0);
+        stats.player_sunk = false;
+        return;
+    }
+    let Ok((transform, player, mut helm, mut guns)) = players.single_mut() else {
+        return;
+    };
+    let nearest = targets.iter().min_by(|a, b| {
+        let da = a.translation.distance_squared(transform.translation);
+        let db = b.translation.distance_squared(transform.translation);
+        da.total_cmp(&db)
+    });
+    let Some(target) = nearest else {
+        helm.thrust = 0.5;
+        helm.turn = 0.1;
+        return;
+    };
+    steer_broadside(
+        transform,
+        player.yaw,
+        target.translation,
+        &mut helm,
+        &mut guns,
+    );
+}
+
+/// Shared broadside-circling brain: close to gun range, hold the target
+/// abeam, and fire the facing side.
+fn steer_broadside(
+    transform: &Transform,
+    yaw: f32,
+    target: Vec3,
+    helm: &mut Helm,
+    guns: &mut Broadsides,
+) {
+    let to_target = target - transform.translation;
+    let flat = Vec3::new(to_target.x, 0.0, to_target.z);
+    let distance = flat.length();
+    let dir = flat / distance.max(0.01);
+
+    let tangent = Vec3::new(-dir.z, 0.0, dir.x);
+    let desired = if distance > 20.0 {
+        dir
+    } else if distance < 8.0 {
+        (tangent - dir).normalize()
+    } else {
+        (tangent * 0.85 + dir * 0.15).normalize()
+    };
+
+    let desired_yaw = (-desired.z).atan2(desired.x);
+    let mut yaw_error = desired_yaw - yaw;
+    yaw_error = (yaw_error + PI).rem_euclid(TAU) - PI;
+    helm.turn = (yaw_error * 2.0).clamp(-1.0, 1.0);
+    helm.thrust = if distance > 14.0 { 1.0 } else { 0.55 };
+
+    if distance < FIRE_RANGE {
+        let starboard = transform.rotation * Vec3::Z;
+        let bearing = starboard.dot(dir);
+        if bearing > 0.92 {
+            guns.fire_starboard = true;
+        } else if bearing < -0.92 {
+            guns.fire_port = true;
+        }
+    }
+}
+
 /// Simple broadside AI: close to gun range, then circle the player so the
 /// broadside naturally bears, and fire whichever side faces them.
 pub fn enemy_ai(
@@ -165,36 +249,12 @@ pub fn enemy_ai(
     };
 
     for (transform, enemy, mut helm, mut guns) in &mut enemies {
-        let to_player = player.translation - transform.translation;
-        let flat = Vec3::new(to_player.x, 0.0, to_player.z);
-        let distance = flat.length();
-        let dir = flat / distance.max(0.01);
-
-        // Tangent of the circle around the player; sailing along it keeps
-        // the target abeam, which is exactly where the guns point.
-        let tangent = Vec3::new(-dir.z, 0.0, dir.x);
-        let desired = if distance > 20.0 {
-            dir
-        } else if distance < 8.0 {
-            (tangent - dir).normalize()
-        } else {
-            (tangent * 0.85 + dir * 0.15).normalize()
-        };
-
-        let desired_yaw = (-desired.z).atan2(desired.x);
-        let mut yaw_error = desired_yaw - enemy.yaw;
-        yaw_error = (yaw_error + PI).rem_euclid(TAU) - PI;
-        helm.turn = (yaw_error * 2.0).clamp(-1.0, 1.0);
-        helm.thrust = if distance > 14.0 { 1.0 } else { 0.55 };
-
-        if distance < FIRE_RANGE {
-            let starboard = transform.rotation * Vec3::Z;
-            let bearing = starboard.dot(dir);
-            if bearing > 0.92 {
-                guns.fire_starboard = true;
-            } else if bearing < -0.92 {
-                guns.fire_port = true;
-            }
-        }
+        steer_broadside(
+            transform,
+            enemy.yaw,
+            player.translation,
+            &mut helm,
+            &mut guns,
+        );
     }
 }

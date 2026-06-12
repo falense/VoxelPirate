@@ -32,6 +32,10 @@ fn main() {
         stats.tier = 2;
     }
     app.insert_resource(stats);
+    // Autopilot pacing test: the player ship fights on its own.
+    if std::env::args().any(|arg| arg == "--demo") {
+        app.init_resource::<enemy::DemoMode>();
+    }
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
             title: "VoxelPirates".into(),
@@ -68,6 +72,7 @@ fn main() {
                 ship::player_helm,
                 ship::player_fire_mouse,
                 build::build_input,
+                enemy::demo_pilot.run_if(resource_exists::<enemy::DemoMode>),
                 enemy::enemy_ai,
             )
                 .chain(),
