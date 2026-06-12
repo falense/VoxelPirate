@@ -1,0 +1,15 @@
+[package]
+name = "craftpirate"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = "0.18.1"
+
+# Bevy is unplayably slow in unoptimized debug builds; optimize dependencies
+# fully while keeping our own code fast to compile.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
