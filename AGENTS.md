@@ -23,6 +23,24 @@ a rigid body — unlike Minecraft's static world grid.
   waterline layer.
 - The waterline is world y = 0 (`src/ocean.rs`).
 
+## Decision protocol: ask only at the Pareto front
+
+When developing autonomously, use Pareto optimality as the criterion for when
+to ask the user for direction:
+
+- **One option dominates** (better on at least one axis — correctness, perf,
+  simplicity, extensibility — and worse on none): take it. Do not ask.
+- **Options are Pareto-equivalent** (neither is better or worse; the pick is
+  purely a matter of preference — game feel, art direction, which mechanic to
+  prioritize, naming): ask the user before proceeding down either path.
+- **If the user doesn't respond**: park the decision in `DECISIONS.md` with
+  the options, their trade-offs, and a recommendation. Then switch to an
+  independent branch of work that doesn't depend on the parked choice. When
+  the user returns, surface the queue.
+
+Don't manufacture questions for dominated choices, and don't silently pick a
+preference the user would have wanted to make.
+
 ## Commands
 
 - `cargo check` — fast compile check (use this in the edit loop)
