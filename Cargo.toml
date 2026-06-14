@@ -4,7 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = "0.18.1"
+# `wav` enables rodio's WAV decoder — our sound effects (src/audio.rs) are
+# procedurally rendered into in-memory WAVs, and without this feature Bevy
+# only ships the Vorbis decoder and panics with `UnrecognizedFormat` the
+# first time a sound plays.
+bevy = { version = "0.18.1", features = ["wav"] }
 
 # Bevy is unplayably slow in unoptimized debug builds; optimize dependencies
 # fully while keeping our own code fast to compile.
