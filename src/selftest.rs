@@ -78,13 +78,14 @@ pub fn run_selftest(
             aim.0 = sea_point;
             state.step += 1;
         }
-        // Fire the starboard broadside at open water.
+        // Fire the starboard broadside at open water (sea_point is to
+        // starboard, so right mouse = starboard guns; see Spec 001).
         7 if t > 4.8 => {
-            mouse.press(MouseButton::Left);
+            mouse.press(MouseButton::Right);
             state.step += 1;
         }
         8 => {
-            mouse.release(MouseButton::Left);
+            mouse.release(MouseButton::Right);
             state.step += 1;
         }
         9 if t > 5.4 => {

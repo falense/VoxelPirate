@@ -319,21 +319,25 @@ pub fn player_helm(
     }
 }
 
-/// Left click fires the broadside facing the cursor: the click is projected
-/// onto the sea, and whichever side of the ship that point lies on fires.
-/// Keeps sailing on the left hand and gunnery on the right.
+/// Mouse gunnery (Spec 001): the click is projected onto the sea, and the
+/// guns converge on that point. The button picks the side — left mouse fires
+/// the port (left) broadside, right mouse the starboard (right) — and a gun
+/// only fires if it can swing to bear on the point, so clicking the wrong
+/// side is a harmless no-op. Keeps sailing on WASD and gunnery on the mouse.
 pub fn player_fire_mouse(
     mode: Res<crate::build::PlayMode>,
     mouse: Res<ButtonInput<MouseButton>>,
     aim: Res<crate::build::AimOverride>,
     windows: Query<&Window>,
     cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
-    mut players: Query<(&Transform, &mut Broadsides), With<PlayerShip>>,
+    mut players: Query<&mut Broadsides, With<PlayerShip>>,
 ) {
     if *mode != crate::build::PlayMode::Sail {
         return;
     }
-    if !mouse.just_pressed(MouseButton::Left) {
+    let fire_port = mouse.just_pressed(MouseButton::Left);
+    let fire_starboard = mouse.just_pressed(MouseButton::Right);
+    if !fire_port && !fire_starboard {
         return;
     }
     let Some(ray) = crate::build::cursor_ray(&windows, &cameras, &aim) else {
@@ -347,12 +351,12 @@ pub fn player_fire_mouse(
         return;
     }
     let aim_point = ray.origin + ray.direction * t;
-    for (transform, mut guns) in &mut players {
-        let starboard = transform.rotation * Vec3::Z;
-        if (aim_point - transform.translation).dot(starboard) >= 0.0 {
-            guns.fire_starboard = true;
-        } else {
-            guns.fire_port = true;
+    for mut guns in &mut players {
+        if fire_port {
+            guns.aim_port = Some(aim_point);
+        }
+        if fire_starboard {
+            guns.aim_starboard = Some(aim_point);
         }
     }
 }
