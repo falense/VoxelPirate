@@ -95,6 +95,7 @@ pub fn build_input(
         KeyCode::Digit5,
         KeyCode::Digit6,
         KeyCode::Digit7,
+        KeyCode::Digit8,
     ];
     for (key, id) in digits.iter().zip(blocks::ALL) {
         if keys.just_pressed(*key) {

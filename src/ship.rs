@@ -186,79 +186,277 @@ pub fn spawn_ship(
     ship
 }
 
-/// Shared hull builder: a `length` x `width` deck-on-hull slab with masts
-/// (plus square sails) at the given x positions and cannons along both rails.
-fn hull_layout(
+/// A tall-ship recipe (Spec 002). `build` turns one of these into a tapered,
+/// multi-level hull with bulwarks, gun ports, castles, masts, and rigging.
+/// Bow is +x (the ship's forward), the centerline runs down z = beam / 2.
+struct ShipSpec {
+    /// Hull length along the keel (number of x stations).
     length: i32,
-    width: i32,
+    /// Maximum beam (width in z) amidships; should be odd for a clean
+    /// centerline. The hull tapers away from this fore and aft.
+    beam: i32,
+    /// Hull material — `OakHull` or `IronHull`.
     hull: BlockId,
-    mast_xs: &[i32],
-    mast_height: i32,
-    cannon_xs: &[i32],
-) -> HashMap<IVec3, BlockId> {
-    let mut layout = HashMap::new();
-    for x in 0..length {
-        for z in 0..width {
-            layout.insert(IVec3::new(x, 0, z), hull);
-            layout.insert(IVec3::new(x, 1, z), BlockId::OakDeck);
-        }
+    /// Solid hull layers from the keel up (waterline and below).
+    hull_height: i32,
+    /// Stations over which the bow narrows to its cutwater point.
+    bow: i32,
+    /// Stations over which the stern fills out to its transom.
+    stern: i32,
+    /// Masts as (x station, pole height above the deck).
+    masts: &'static [(i32, i32)],
+    /// Cannons per side, spaced evenly along the rail amidships.
+    guns_per_side: i32,
+    /// Whether to raise a quarterdeck aft and a forecastle forward.
+    castles: bool,
+}
+
+/// Half-beam (in z) of the hull at station `x`: full amidships, tapering to a
+/// point at the bow and to a broad transom at the stern.
+fn half_width(spec: &ShipSpec, x: i32) -> i32 {
+    let max = (spec.beam - 1) / 2;
+    if x >= spec.length - spec.bow {
+        // Bow: shrink from full beam to 0 (a single cutwater column) at the tip.
+        let into = x - (spec.length - spec.bow) + 1;
+        let frac = into as f32 / spec.bow as f32;
+        (max as f32 * (1.0 - frac)).round().max(0.0) as i32
+    } else if x < spec.stern {
+        // Stern: grow from a half-beam transom up to full beam.
+        let stern_min = (max + 1) / 2;
+        let frac = x as f32 / spec.stern as f32;
+        (stern_min as f32 + (max - stern_min) as f32 * frac).round() as i32
+    } else {
+        max
     }
-    let mast_z = width / 2;
-    for &x in mast_xs {
-        for y in 2..2 + mast_height {
-            layout.insert(IVec3::new(x, y, mast_z), BlockId::Mast);
-        }
-        for y in 3..1 + mast_height {
-            for z in 0..width {
-                if z != mast_z {
-                    layout.insert(IVec3::new(x, y, z), BlockId::Sail);
-                }
+}
+
+/// Render a `ShipSpec` into a voxel layout.
+fn build(spec: &ShipSpec) -> HashMap<IVec3, BlockId> {
+    let mut m = HashMap::new();
+    let cz = spec.beam / 2;
+    let deck_y = spec.hull_height;
+    let rail_y = deck_y + 1;
+
+    // Solid tapered hull, capped by a weather deck.
+    for x in 0..spec.length {
+        let half = half_width(spec, x);
+        for z in (cz - half)..=(cz + half) {
+            for y in 0..spec.hull_height {
+                m.insert(IVec3::new(x, y, z), spec.hull);
             }
+            m.insert(IVec3::new(x, deck_y, z), BlockId::OakDeck);
         }
     }
-    for &x in cannon_xs {
-        for z in [0, width - 1] {
-            layout.insert(IVec3::new(x, 2, z), BlockId::Cannon);
+
+    // Bulwarks: a raised rail down both sides; the open bow tip stays low.
+    for x in 0..spec.length {
+        let half = half_width(spec, x);
+        if half <= 0 {
+            continue;
         }
+        m.insert(IVec3::new(x, rail_y, cz - half), spec.hull);
+        m.insert(IVec3::new(x, rail_y, cz + half), spec.hull);
     }
-    layout
+    // Closed stern transom across the back.
+    let stern_half = half_width(spec, 0);
+    for z in (cz - stern_half)..=(cz + stern_half) {
+        m.insert(IVec3::new(0, rail_y, z), spec.hull);
+    }
+
+    // Castles raise and wall the ends; guns go in the clear waist between
+    // them, so the waist span depends on whether this ship has castles.
+    let (mut waist_lo, mut waist_hi) = (spec.stern, spec.length - spec.bow);
+    if spec.castles {
+        // Quarterdeck: raise and wall the stern third for a sterncastle.
+        let q_len = (spec.stern + 1).min(spec.length);
+        raise_castle(&mut m, spec, cz, rail_y, 0, q_len);
+        // Forecastle: a short raised deck just aft of the bow taper.
+        let f_end = (spec.length - spec.bow + 1).min(spec.length);
+        let f_start = (f_end - 3).max(q_len);
+        raise_castle(&mut m, spec, cz, rail_y, f_start, f_end);
+        waist_lo = q_len;
+        waist_hi = f_start;
+    }
+
+    // Gun ports: cannons evenly along the rail through the waist, both sides.
+    for i in 0..spec.guns_per_side {
+        let x = waist_lo + (waist_hi - waist_lo) * (i * 2 + 1) / (spec.guns_per_side * 2);
+        let half = half_width(spec, x);
+        if half <= 0 {
+            continue;
+        }
+        m.insert(IVec3::new(x, rail_y, cz - half), BlockId::Cannon);
+        m.insert(IVec3::new(x, rail_y, cz + half), BlockId::Cannon);
+    }
+
+    // Masts: pole, two stacked square sails on yards, and a masthead pennant.
+    let sail_hw = (spec.beam - 1) / 2 + 1;
+    for &(mx, mh) in spec.masts {
+        for y in rail_y..=rail_y + mh {
+            m.insert(IVec3::new(mx, y, cz), BlockId::Mast);
+        }
+        m.insert(IVec3::new(mx, rail_y + mh + 1, cz), BlockId::Flag);
+        add_sail(
+            &mut m,
+            mx,
+            cz,
+            sail_hw,
+            rail_y + mh / 3,
+            rail_y + mh * 3 / 5,
+        );
+        add_sail(
+            &mut m,
+            mx,
+            cz,
+            (sail_hw - 1).max(1),
+            rail_y + mh * 3 / 5 + 2,
+            rail_y + mh - 1,
+        );
+    }
+
+    // Bowsprit angling up and forward off the bow, carrying a small jib.
+    let tip = spec.length - 1;
+    for k in 1..=3 {
+        m.insert(IVec3::new(tip + k, rail_y + k.min(2), cz), BlockId::Mast);
+    }
+    m.insert(IVec3::new(tip + 1, rail_y + 1, cz - 1), BlockId::Sail);
+    m.insert(IVec3::new(tip + 1, rail_y + 1, cz + 1), BlockId::Sail);
+    m.insert(IVec3::new(tip + 2, rail_y + 2, cz), BlockId::Sail);
+
+    m
 }
 
-/// Tier 0: the starter barge — 8x4, one mast, two cannons per side.
+/// Raise a walled deck (a fore- or quarter-castle) over stations `x0..x1`:
+/// an `OakDeck` floor one level up with hull-block walls around it.
+fn raise_castle(
+    m: &mut HashMap<IVec3, BlockId>,
+    spec: &ShipSpec,
+    cz: i32,
+    rail_y: i32,
+    x0: i32,
+    x1: i32,
+) {
+    for x in x0..x1 {
+        let half = half_width(spec, x);
+        if half <= 0 {
+            continue;
+        }
+        for z in (cz - half)..=(cz + half) {
+            m.insert(IVec3::new(x, rail_y, z), BlockId::OakDeck);
+        }
+        m.insert(IVec3::new(x, rail_y + 1, cz - half), spec.hull);
+        m.insert(IVec3::new(x, rail_y + 1, cz + half), spec.hull);
+    }
+    // End bulkheads close the castle off fore and aft.
+    for &x in &[x0, x1 - 1] {
+        let half = half_width(spec, x);
+        for z in (cz - half)..=(cz + half) {
+            m.insert(IVec3::new(x, rail_y + 1, z), spec.hull);
+        }
+    }
+}
+
+/// A square sail: a flat panel in the y-z plane at station `x`, hung beneath a
+/// horizontal yard. Leaves the mast column intact (sails don't overwrite it).
+fn add_sail(m: &mut HashMap<IVec3, BlockId>, x: i32, cz: i32, hw: i32, y0: i32, y1: i32) {
+    for z in (cz - hw)..=(cz + hw) {
+        m.insert(IVec3::new(x, y1 + 1, z), BlockId::Mast); // the yard
+    }
+    for y in y0..=y1 {
+        for z in (cz - hw)..=(cz + hw) {
+            m.entry(IVec3::new(x, y, z)).or_insert(BlockId::Sail);
+        }
+    }
+}
+
+/// Tier 0: the starter barge — humble, single-masted, two guns a side.
 pub fn barge_layout() -> HashMap<IVec3, BlockId> {
-    hull_layout(8, 4, BlockId::OakHull, &[4], 5, &[2, 6])
+    build(&ShipSpec {
+        length: 12,
+        beam: 5,
+        hull: BlockId::OakHull,
+        hull_height: 2,
+        bow: 3,
+        stern: 2,
+        masts: &[(6, 6)],
+        guns_per_side: 2,
+        castles: false,
+    })
 }
 
-/// Tier 1: brig — 10x5, two masts, three cannons per side.
+/// Tier 1: brig — two masts, a raised stern, three guns a side.
 pub fn brig_layout() -> HashMap<IVec3, BlockId> {
-    hull_layout(10, 5, BlockId::OakHull, &[2, 6], 5, &[1, 4, 8])
+    build(&ShipSpec {
+        length: 15,
+        beam: 7,
+        hull: BlockId::OakHull,
+        hull_height: 2,
+        bow: 4,
+        stern: 3,
+        masts: &[(5, 7), (10, 8)],
+        guns_per_side: 3,
+        castles: true,
+    })
 }
 
-/// Tier 2: frigate — 12x5, iron hull, four cannons per side.
+/// Tier 2: frigate — iron-hulled, three masts, four guns a side.
 pub fn frigate_layout() -> HashMap<IVec3, BlockId> {
-    hull_layout(12, 5, BlockId::IronHull, &[3, 8], 6, &[1, 4, 7, 10])
+    build(&ShipSpec {
+        length: 19,
+        beam: 7,
+        hull: BlockId::IronHull,
+        hull_height: 2,
+        bow: 5,
+        stern: 4,
+        masts: &[(5, 8), (10, 9), (15, 7)],
+        guns_per_side: 4,
+        castles: true,
+    })
 }
 
-/// Tier 3: galleon — 14x6, iron hull, three masts, five cannons per side.
+/// Tier 3: galleon — broad iron hull, towering rig, five guns a side.
 pub fn galleon_layout() -> HashMap<IVec3, BlockId> {
-    hull_layout(14, 6, BlockId::IronHull, &[3, 7, 11], 6, &[1, 4, 7, 10, 13])
+    build(&ShipSpec {
+        length: 23,
+        beam: 9,
+        hull: BlockId::IronHull,
+        hull_height: 2,
+        bow: 6,
+        stern: 5,
+        masts: &[(6, 9), (12, 11), (18, 8)],
+        guns_per_side: 5,
+        castles: true,
+    })
 }
 
-/// Smallest hostile: 7x3 sloop, two cannons per side.
+/// Smallest hostile: a nimble single-masted sloop.
 pub fn sloop_layout() -> HashMap<IVec3, BlockId> {
-    hull_layout(7, 3, BlockId::OakHull, &[3], 4, &[1, 5])
+    build(&ShipSpec {
+        length: 11,
+        beam: 5,
+        hull: BlockId::OakHull,
+        hull_height: 2,
+        bow: 3,
+        stern: 2,
+        masts: &[(5, 6)],
+        guns_per_side: 2,
+        castles: false,
+    })
 }
 
-/// The boss: a 20x8 iron monster with seven cannons per side.
+/// The boss: a four-masted iron leviathan, seven guns a side.
 pub fn dreadnought_layout() -> HashMap<IVec3, BlockId> {
-    hull_layout(
-        20,
-        8,
-        BlockId::IronHull,
-        &[3, 8, 13, 17],
-        7,
-        &[1, 4, 7, 10, 13, 16, 18],
-    )
+    build(&ShipSpec {
+        length: 29,
+        beam: 11,
+        hull: BlockId::IronHull,
+        hull_height: 3,
+        bow: 7,
+        stern: 6,
+        masts: &[(7, 10), (13, 13), (19, 12), (24, 9)],
+        guns_per_side: 7,
+        castles: true,
+    })
 }
 
 /// Spawn the player's ship for the given upgrade tier.
