@@ -14,8 +14,10 @@ mod salvage;
 mod selftest;
 mod ship;
 
+use bevy::camera::Exposure;
 use bevy::input::mouse::AccumulatedMouseScroll;
-use bevy::pbr::{DistanceFog, FogFalloff};
+use bevy::pbr::{Atmosphere, ScatteringMedium};
+use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 
 use ship::{PlayerShip, ShipVoxels};
@@ -109,6 +111,7 @@ fn main() {
                 enemy::maintain_fleet,
                 ship::respawn_player,
                 ocean::follow_player,
+                ocean::animate_ocean,
                 chase_camera,
                 hud::update_hud,
                 hud::update_intel,
@@ -132,35 +135,34 @@ fn toggle_pause(keys: Res<ButtonInput<KeyCode>>, mut time: ResMut<Time<Virtual>>
     }
 }
 
-fn setup_scene(mut commands: Commands) {
+fn setup_scene(mut commands: Commands, mut mediums: ResMut<Assets<ScatteringMedium>>) {
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(-16.0, 9.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
+        // Physical sky: scattering atmosphere with a real sun (implies an
+        // HDR camera), sunlight-calibrated exposure, and bloom so muzzle
+        // flashes and stern lanterns actually glow.
+        Atmosphere::earthlike(mediums.add(ScatteringMedium::default())),
+        Exposure::SUNLIGHT,
+        Bloom::NATURAL,
         // Sky fill so faces turned away from the sun (the whole ship, seen
         // from the chase camera) stay readable instead of going black.
+        // Daylight-sky levels to match the sunlight exposure.
         AmbientLight {
             color: Color::srgb(0.75, 0.85, 1.0),
-            brightness: 400.0,
-            ..default()
-        },
-        // Haze the horizon into the sky so the finite ocean plane never
-        // shows an edge.
-        DistanceFog {
-            color: Color::srgb(0.55, 0.75, 0.90),
-            falloff: FogFalloff::Linear {
-                start: 90.0,
-                end: 220.0,
-            },
+            brightness: 15_000.0,
             ..default()
         },
     ));
     commands.spawn((
         DirectionalLight {
-            illuminance: 12_000.0,
+            illuminance: 100_000.0,
             shadows_enabled: true,
             ..default()
         },
-        Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.9, 0.4, 0.0)),
+        // Mid-afternoon sun: high enough for readable shadows, low enough
+        // to drag a glitter path across the swell.
+        Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.7, 0.4, 0.0)),
     ));
 }
 

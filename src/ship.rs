@@ -773,9 +773,11 @@ pub fn separate_ships(
     }
 }
 
-/// Fake buoyancy until real per-block physics: bob on a sine swell and
-/// combine heading with a gentle roll/pitch. Phase varies with position so
-/// ships don't bob in lockstep, and battle damage makes a ship ride lower.
+/// Simplified buoyancy until real per-block physics: ships ride the shared
+/// ocean swell ([`crate::ocean::wave_height`]), taking their height from the
+/// surface under the hull and their pitch/roll from the wave slope sampled
+/// bow-to-stern and beam-to-beam — softened so a hull reads as massive
+/// rather than cork-like. Battle damage makes a ship ride lower.
 pub fn float_ships(
     time: Res<Time>,
     mut ships: Query<(&Ship, &ShipVoxels, &mut Transform), Without<Sinking>>,
@@ -783,13 +785,21 @@ pub fn float_ships(
     let t = time.elapsed_secs();
     for (ship, voxels, mut transform) in &mut ships {
         let draft = voxels.damage_fraction() * 0.7;
-        let phase = transform.translation.x * 0.13 + transform.translation.z * 0.17;
-        transform.translation.y = (t * 0.9 + phase).sin() * 0.12 - draft;
-        let roll = (t * 0.7 + phase).sin() * 0.025;
-        let pitch = (t * 0.5 + phase).cos() * 0.015;
+        let p = transform.translation.xz();
+        let forward = Vec2::new(ship.yaw.cos(), -ship.yaw.sin());
+        let beam = Vec2::new(-forward.y, forward.x);
+        let half_len = (voxels.radius * 0.7).max(2.0);
+        let half_beam = (voxels.radius * 0.35).max(1.5);
+        transform.translation.y = crate::ocean::wave_height(p, t) - draft;
+        let bow = crate::ocean::wave_height(p + forward * half_len, t);
+        let stern = crate::ocean::wave_height(p - forward * half_len, t);
+        let starboard = crate::ocean::wave_height(p + beam * half_beam, t);
+        let port = crate::ocean::wave_height(p - beam * half_beam, t);
+        let pitch = ((bow - stern) / (2.0 * half_len)).atan() * 0.8;
+        let roll = ((port - starboard) / (2.0 * half_beam)).atan() * 0.6;
         transform.rotation = Quat::from_rotation_y(ship.yaw)
-            * Quat::from_rotation_x(roll)
-            * Quat::from_rotation_z(pitch);
+            * Quat::from_rotation_z(pitch)
+            * Quat::from_rotation_x(roll);
     }
 }
 

@@ -74,7 +74,9 @@ pub fn update_flotsam(
             commands.entity(entity).despawn();
             continue;
         }
-        transform.translation.y = 0.15 + (t * 1.2 + piece.phase).sin() * 0.08;
+        transform.translation.y = crate::ocean::wave_height(transform.translation.xz(), t)
+            + 0.12
+            + (t * 1.2 + piece.phase).sin() * 0.05;
         transform.rotate_y(0.4 * dt);
 
         let Some((ship_entity, ship_transform, voxels)) = player.as_mut() else {

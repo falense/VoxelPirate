@@ -17,7 +17,21 @@ Format per entry:
 
 ## Open
 
-(none)
+## Remaining graphics upgrades — parked 2026-07-02
+**Blocked work:** none (independent polish items).
+**Context:** Sondre asked for richer graphics; of the four candidates, the
+living ocean, physical sky/bloom, and per-block PBR materials shipped in
+spec 004. The rest were parked when the direction question went unanswered:
+**Options:**
+- A: Wakes & combat feedback — foam wake + bow spray, cannonball smoke
+  trails, camera shake on hits. Pure feel; cheap particles.
+- B: Procedural block textures — code-generated wood grain / plank seams /
+  canvas weave, pushing toward the Minecraft look (colors alone read flat
+  up close).
+- C: Stop here and return to gameplay (structural connectivity, real
+  buoyancy).
+**Recommendation:** A — motion feedback compounds with the new swell, and
+the sea still looks empty behind a moving ship.
 
 ## Resolved
 

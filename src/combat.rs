@@ -338,12 +338,13 @@ pub fn update_cannonballs(
                 continue 'balls;
             }
 
-            if point.y < 0.0 {
+            let sea = crate::ocean::wave_height(point.xz(), time.elapsed_secs());
+            if point.y < sea {
                 spawn_effect(
                     &mut commands,
                     &assets,
                     assets.splash_material.clone(),
-                    Vec3::new(point.x, 0.1, point.z),
+                    Vec3::new(point.x, sea + 0.1, point.z),
                     0.5,
                     0.4,
                     2.0,
