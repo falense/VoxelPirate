@@ -49,14 +49,14 @@ pub fn record_sunk(
     if is_player {
         stats.player_sunk = true;
     } else if is_derelict {
-        stats.announce("Derelict broke apart — salvage adrift!");
+        stats.announce("Derelict broke apart: salvage adrift!");
     } else {
         if player_credit {
             stats.kills += 1;
         }
         if is_boss {
             stats.victory = true;
-            stats.announcement = "VICTORY — the Dreadnought is sunk! The seas are yours.".into();
+            stats.announcement = "VICTORY! The Dreadnought is sunk. The seas are yours.".into();
             stats.announce_ttl = 12.0;
         }
     }

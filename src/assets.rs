@@ -25,6 +25,8 @@ pub struct GameAssets {
     pub ball_mesh: Handle<Mesh>,
     pub effect_mesh: Handle<Mesh>,
     pub block_materials: HashMap<BlockId, Handle<StandardMaterial>>,
+    /// The 16x16 tile of each block, for UI icons (hotbar slots).
+    pub block_tiles: HashMap<BlockId, Handle<Image>>,
     /// All opaque blocks, atlas-textured (color + metal/rough + emissive).
     pub atlas_opaque: Handle<StandardMaterial>,
     /// Translucent blocks (sails), alpha-blended, casting no shadow.
@@ -58,6 +60,7 @@ pub fn setup_assets(
     let mut surface_atlas = vec![0u8; (atlas_px * atlas_px * 4) as usize];
     let mut emissive_atlas = vec![0u8; (atlas_px * atlas_px * 4) as usize];
     let mut block_materials = HashMap::new();
+    let mut block_tiles = HashMap::new();
     for (index, id) in blocks::ALL.into_iter().enumerate() {
         let def = blocks::def(id);
         let mut tile = vec![0u8; (TILE * TILE * 4) as usize];
@@ -81,6 +84,7 @@ pub fn setup_assets(
             }
         }
         let image = images.add(tile_image(tile, TILE, TextureFormat::Rgba8UnormSrgb));
+        block_tiles.insert(id, image.clone());
         block_materials.insert(
             id,
             materials.add(StandardMaterial {
@@ -136,6 +140,7 @@ pub fn setup_assets(
         ball_mesh: meshes.add(Sphere::new(0.22)),
         effect_mesh: meshes.add(Sphere::new(0.5)),
         block_materials,
+        block_tiles,
         atlas_opaque,
         atlas_translucent,
         ball_material: materials.add(StandardMaterial {
@@ -168,7 +173,7 @@ fn tile_image(data: Vec<u8>, size: u32, format: TextureFormat) -> Image {
         TextureDimension::D2,
         data,
         format,
-        RenderAssetUsages::RENDER_WORLD,
+        RenderAssetUsages::default(),
     );
     // Crisp voxel-game pixels rather than blurry interpolation.
     image.sampler = ImageSampler::nearest();
