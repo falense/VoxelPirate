@@ -53,6 +53,7 @@ fn main() {
         }),
         ..default()
     }))
+    .add_plugins(ocean::OceanPlugin)
     .insert_resource(ClearColor(Color::srgb(0.55, 0.75, 0.90)))
     .init_resource::<enemy::FleetDirector>()
     .init_resource::<salvage::DerelictDirector>()
@@ -110,8 +111,11 @@ fn main() {
             (
                 enemy::maintain_fleet,
                 ship::respawn_player,
+                // After every system that can touch voxels this frame
+                // (combat, building, salvage repair): rebuild changed
+                // ship meshes exactly once.
+                ship::remesh_ships,
                 ocean::follow_player,
-                ocean::animate_ocean,
                 chase_camera,
                 hud::update_hud,
                 hud::update_intel,
@@ -160,6 +164,14 @@ fn setup_scene(mut commands: Commands, mut mediums: ResMut<Assets<ScatteringMedi
             shadows_enabled: true,
             ..default()
         },
+        // Two nearby cascades instead of the default four: the action all
+        // happens within ~150 m, and shadow passes are dear on an iGPU.
+        bevy::light::CascadeShadowConfigBuilder {
+            num_cascades: 2,
+            maximum_distance: 150.0,
+            ..default()
+        }
+        .build(),
         // Mid-afternoon sun: high enough for readable shadows, low enough
         // to drag a glitter path across the swell.
         Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.7, 0.4, 0.0)),

@@ -1,10 +1,113 @@
-use bevy::mesh::VertexAttributeValues;
+use bevy::asset::uuid_handle;
+use bevy::pbr::{ExtendedMaterial, MaterialExtension};
 use bevy::prelude::*;
+use bevy::render::render_resource::AsBindGroup;
+use bevy::shader::{Shader, ShaderRef};
 
 use crate::ship::PlayerShip;
 
-/// The wave-animated sea surface around the player. Also carries the
-/// follow-player behaviour.
+/// The sea's `StandardMaterial` extended with a vertex stage that rolls the
+/// swell through the mesh on the GPU. The CPU animated the vertices at
+/// first, but rewriting and re-uploading ~15k vertices every frame cost
+/// more than the entire rest of the game.
+pub type OceanMaterial = ExtendedMaterial<StandardMaterial, OceanExtension>;
+
+/// The three [`SWELLS`], packed for the shader as
+/// `(dir.x * k, dir.y * k, angular speed, amplitude)`, `k = tau / wavelength`.
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+pub struct OceanExtension {
+    #[uniform(100)]
+    swell_a: Vec4,
+    #[uniform(101)]
+    swell_b: Vec4,
+    #[uniform(102)]
+    swell_c: Vec4,
+}
+
+impl Default for OceanExtension {
+    fn default() -> Self {
+        let pack = |i: usize| {
+            let (dir, wavelength, amplitude, speed) = SWELLS[i];
+            let d = dir.normalize() * (std::f32::consts::TAU / wavelength);
+            Vec4::new(d.x, d.y, speed, amplitude)
+        };
+        Self {
+            swell_a: pack(0),
+            swell_b: pack(1),
+            swell_c: pack(2),
+        }
+    }
+}
+
+impl MaterialExtension for OceanExtension {
+    fn vertex_shader() -> ShaderRef {
+        OCEAN_SHADER_HANDLE.into()
+    }
+}
+
+const OCEAN_SHADER_HANDLE: Handle<Shader> = uuid_handle!("6f3b9c42-8a51-4d0e-9b7a-51c2ad38e6f1");
+
+/// Displace the water in the vertex stage by the same swell sum as
+/// [`wave_sample`], with analytic normals. `globals.time` is the wrapped
+/// game clock, which is why the CPU side samples wrapped time too.
+const OCEAN_WGSL: &str = r#"
+#import bevy_pbr::{
+    mesh_functions,
+    forward_io::{Vertex, VertexOutput},
+    view_transformations::position_world_to_clip,
+    mesh_view_bindings::globals,
+}
+
+@group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> swell_a: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(101) var<uniform> swell_b: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(102) var<uniform> swell_c: vec4<f32>;
+
+// Returns (d height / dx, d height / dz, height) for one swell train.
+fn swell(s: vec4<f32>, p: vec2<f32>, t: f32) -> vec3<f32> {
+    let phase = dot(s.xy, p) + t * s.z;
+    return vec3<f32>(s.xy * (s.w * cos(phase)), s.w * sin(phase));
+}
+
+@vertex
+fn vertex(vertex: Vertex) -> VertexOutput {
+    var out: VertexOutput;
+    let world_from_local = mesh_functions::get_world_from_local(vertex.instance_index);
+    var world_position = mesh_functions::mesh_position_local_to_world(
+        world_from_local, vec4<f32>(vertex.position, 1.0));
+    let t = globals.time;
+    let a = swell(swell_a, world_position.xz, t);
+    let b = swell(swell_b, world_position.xz, t);
+    let c = swell(swell_c, world_position.xz, t);
+    let grad = a.xy + b.xy + c.xy;
+    // A hair below the sampled height so hulls never z-fight the surface.
+    world_position.y = a.z + b.z + c.z - 0.04;
+    out.world_position = world_position;
+    out.position = position_world_to_clip(world_position.xyz);
+    out.world_normal = normalize(vec3<f32>(-grad.x, 1.0, -grad.y));
+#ifdef VERTEX_UVS_A
+    out.uv = vertex.uv;
+#endif
+#ifdef VERTEX_OUTPUT_INSTANCE_INDEX
+    out.instance_index = vertex.instance_index;
+#endif
+    return out;
+}
+"#;
+
+/// Registers the ocean material pipeline and its embedded shader.
+pub struct OceanPlugin;
+
+impl Plugin for OceanPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(MaterialPlugin::<OceanMaterial>::default());
+        let _ = app.world_mut().resource_mut::<Assets<Shader>>().insert(
+            OCEAN_SHADER_HANDLE.id(),
+            Shader::from_wgsl(OCEAN_WGSL, "ocean.wgsl"),
+        );
+    }
+}
+
+/// The wave-displaced sea surface around the player (follows the player).
 #[derive(Component)]
 pub struct Ocean;
 
@@ -53,9 +156,9 @@ pub fn wave_height(p: Vec2, t: f32) -> f32 {
     wave_sample(p, t).0
 }
 
-/// Height and slope (dh/dx, dh/dz) of the sea surface in one pass — one
-/// sin/cos pair per swell, which matters when the sea mesh samples this at
-/// every vertex every frame.
+/// Height and slope (dh/dx, dh/dz) of the sea surface in one pass. The
+/// GPU vertex stage (`OCEAN_WGSL`) computes exactly this sum; keep the two
+/// in sync through the packed [`OceanExtension`] uniforms.
 pub fn wave_sample(p: Vec2, t: f32) -> (f32, Vec2) {
     let mut height = 0.0;
     let mut gradient = Vec2::ZERO;
@@ -72,24 +175,26 @@ pub fn wave_sample(p: Vec2, t: f32) -> (f32, Vec2) {
 /// Side length of the (finite, player-following) animated sea mesh; past it
 /// the flat skirt takes over, far enough out that the seam sits low in view.
 const OCEAN_SIZE: f32 = 480.0;
-/// Grid resolution; cells of ~4 blocks resolve the shortest swell.
-const OCEAN_SUBDIVISIONS: u32 = 120;
+/// Grid resolution: 6 m cells — enough for the two big swell trains, and a
+/// deliberate ceiling on vertex-shader load for integrated GPUs.
+const OCEAN_SUBDIVISIONS: u32 = 80;
 
-/// The waterline sits at y = 0. The surface itself is displaced every frame
-/// by [`animate_ocean`]; a glossy material catches the sun on the swell.
-/// A vast flat skirt slightly below the trough line carries the same water
-/// out to the true horizon, where the atmosphere hazes it away.
+/// The waterline sits at y = 0. The surface is displaced on the GPU by the
+/// [`OceanMaterial`] vertex stage; a glossy material catches the sun on the
+/// swell. A vast flat skirt slightly below the trough line carries the same
+/// water out to the true horizon, where the atmosphere hazes it away.
 pub fn spawn_ocean(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut ocean_materials: ResMut<Assets<OceanMaterial>>,
 ) {
-    let water = materials.add(StandardMaterial {
+    let water = StandardMaterial {
         base_color: Color::srgb(0.03, 0.19, 0.37),
         perceptual_roughness: 0.15,
         metallic: 0.0,
         ..default()
-    });
+    };
     commands.spawn((
         Ocean,
         Mesh3d(
@@ -100,13 +205,16 @@ pub fn spawn_ocean(
                     .subdivisions(OCEAN_SUBDIVISIONS),
             ),
         ),
-        MeshMaterial3d(water.clone()),
+        MeshMaterial3d(ocean_materials.add(ExtendedMaterial {
+            base: water.clone(),
+            extension: OceanExtension::default(),
+        })),
         Transform::from_xyz(0.0, 0.0, 0.0),
     ));
     commands.spawn((
         OceanSkirt,
         Mesh3d(meshes.add(Plane3d::default().mesh().size(20_000.0, 20_000.0))),
-        MeshMaterial3d(water),
+        MeshMaterial3d(materials.add(water)),
         Transform::from_xyz(0.0, -0.6, 0.0),
     ));
 }
@@ -123,45 +231,5 @@ pub fn follow_player(
     for mut transform in &mut oceans {
         transform.translation.x = player.translation.x;
         transform.translation.z = player.translation.z;
-    }
-}
-
-/// Roll the swell through the sea mesh: every vertex takes the wave height
-/// at its *world* position (the plane follows the player, the waves don't),
-/// with normals from the analytic slope so the sun glints move with the sea.
-/// Dropped a hair below [`wave_height`] so hulls never z-fight the surface.
-pub fn animate_ocean(
-    time: Res<Time>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    oceans: Query<(&Mesh3d, &Transform), With<Ocean>>,
-) {
-    let t = time.elapsed_secs();
-    for (mesh, transform) in &oceans {
-        let Some(mesh) = meshes.get_mut(&mesh.0) else {
-            continue;
-        };
-        let origin = transform.translation;
-        let Some(VertexAttributeValues::Float32x3(positions)) =
-            mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION)
-        else {
-            continue;
-        };
-        let gradients: Vec<Vec2> = positions
-            .iter_mut()
-            .map(|p| {
-                let world = Vec2::new(p[0] + origin.x, p[2] + origin.z);
-                let (height, gradient) = wave_sample(world, t);
-                p[1] = height - 0.04 - origin.y;
-                gradient
-            })
-            .collect();
-        let Some(VertexAttributeValues::Float32x3(normals)) =
-            mesh.attribute_mut(Mesh::ATTRIBUTE_NORMAL)
-        else {
-            continue;
-        };
-        for (n, g) in normals.iter_mut().zip(&gradients) {
-            *n = Vec3::new(-g.x, 1.0, -g.y).normalize().to_array();
-        }
     }
 }

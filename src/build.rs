@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use crate::assets::GameAssets;
 use crate::blocks::{self, BlockId};
 use crate::combat::{GameStats, Sinking};
-use crate::ship::{PlayerShip, ShipVoxels, Voxel};
+use crate::ship::{PlayerShip, ShipVoxels};
 
 /// How far from the camera a build raycast reaches.
 const BUILD_REACH: f32 = 80.0;
@@ -67,7 +67,6 @@ pub fn build_input(
     mode: Res<PlayMode>,
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
-    assets: Res<GameAssets>,
     sounds: Res<crate::audio::SoundBank>,
     mut state: ResMut<BuildState>,
     mut stats: ResMut<GameStats>,
@@ -75,7 +74,7 @@ pub fn build_input(
     windows: Query<&Window>,
     cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     mut players: Query<
-        (Entity, &Transform, &mut ShipVoxels),
+        (&Transform, &mut ShipVoxels),
         (With<PlayerShip>, Without<Sinking>, Without<BuildGhost>),
     >,
     mut ghosts: Query<(&mut Transform, &mut Visibility), With<BuildGhost>>,
@@ -107,7 +106,7 @@ pub fn build_input(
     }
 
     *ghost_visibility = Visibility::Hidden;
-    let Ok((ship_entity, ship_transform, mut voxels)) = players.single_mut() else {
+    let Ok((ship_transform, mut voxels)) = players.single_mut() else {
         return;
     };
     let Some(ray) = cursor_ray(&windows, &cameras, &aim) else {
@@ -137,27 +136,16 @@ pub fn build_input(
         }
         stats.salvage -= cost;
         let id = state.selected;
-        let child = commands
-            .spawn((
-                Mesh3d(assets.cube.clone()),
-                MeshMaterial3d(assets.block_materials[&id].clone()),
-                Transform::from_translation(voxels.local_offset(place_cell)),
-                ChildOf(ship_entity),
-            ))
-            .id();
-        voxels
-            .blocks
-            .insert(place_cell, Voxel { id, entity: child });
+        voxels.blocks.insert(place_cell, id);
         voxels.plan.insert(place_cell, id);
         crate::audio::play(&mut commands, &sounds.ding, 0.35);
     }
 
     if mouse.just_pressed(MouseButton::Right)
-        && let Some(voxel) = voxels.blocks.remove(&hit_cell)
+        && let Some(id) = voxels.blocks.remove(&hit_cell)
     {
-        commands.entity(voxel.entity).despawn();
         voxels.plan.remove(&hit_cell);
-        stats.salvage += blocks::def(voxel.id).cost;
+        stats.salvage += blocks::def(id).cost;
         crate::audio::play(&mut commands, &sounds.crunch, 0.3);
     }
 }

@@ -157,8 +157,8 @@ pub fn fire_cannons(
 
         let ship_velocity = transform.rotation * Vec3::X * ship.speed;
         let (mut fired_port, mut fired_starboard) = (false, false);
-        for (pos, voxel) in &voxels.blocks {
-            let Some(gun) = blocks::def(voxel.id).gun else {
+        for (pos, id) in &voxels.blocks {
+            let Some(gun) = blocks::def(*id).gun else {
                 continue;
             };
             let port_side = (pos.z as f32 + 0.5) * BLOCK_SIZE < voxels.center.z;
@@ -338,7 +338,7 @@ pub fn update_cannonballs(
                 continue 'balls;
             }
 
-            let sea = crate::ocean::wave_height(point.xz(), time.elapsed_secs());
+            let sea = crate::ocean::wave_height(point.xz(), time.elapsed_secs_wrapped());
             if point.y < sea {
                 spawn_effect(
                     &mut commands,
@@ -487,10 +487,9 @@ fn knock_off_block(
     cell: IVec3,
     kick: Vec3,
 ) {
-    let Some(voxel) = voxels.blocks.remove(&cell) else {
+    let Some(id) = voxels.blocks.remove(&cell) else {
         return;
     };
-    commands.entity(voxel.entity).despawn();
     let world = voxels.grid_to_world(ship_transform, cell);
     commands.spawn((
         Debris {
@@ -499,7 +498,7 @@ fn knock_off_block(
             age: 0.0,
         },
         Mesh3d(assets.cube.clone()),
-        MeshMaterial3d(assets.block_materials[&voxel.id].clone()),
+        MeshMaterial3d(assets.block_materials[&id].clone()),
         Transform::from_translation(world).with_scale(Vec3::splat(0.85)),
     ));
 }
@@ -514,17 +513,12 @@ pub fn start_sinking(
     voxels: &ShipVoxels,
 ) {
     commands.entity(ship_entity).insert(Sinking { age: 0.0 });
-    for (count, (cell, voxel)) in voxels.blocks.iter().step_by(3).enumerate() {
+    for (count, (cell, id)) in voxels.blocks.iter().step_by(3).enumerate() {
         if count >= 10 {
             break;
         }
         let world = voxels.grid_to_world(ship_transform, *cell);
-        crate::salvage::spawn_flotsam(
-            commands,
-            assets,
-            voxel.id,
-            Vec3::new(world.x, 0.15, world.z),
-        );
+        crate::salvage::spawn_flotsam(commands, assets, *id, Vec3::new(world.x, 0.15, world.z));
     }
     crate::salvage::spawn_flotsam(
         commands,

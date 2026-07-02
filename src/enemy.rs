@@ -3,7 +3,6 @@ use std::f32::consts::{PI, TAU};
 
 use bevy::prelude::*;
 
-use crate::assets::GameAssets;
 use crate::blocks::BlockId;
 use crate::combat::{Broadsides, GameStats, Sinking};
 use crate::ship::{self, Helm, PlayerShip, Ship};
@@ -74,7 +73,6 @@ const ENEMY_CLASSES: [EnemyClass; 3] = [
 pub fn maintain_fleet(
     mut commands: Commands,
     time: Res<Time>,
-    assets: Res<GameAssets>,
     mut stats: ResMut<GameStats>,
     mut director: ResMut<FleetDirector>,
     enemies: Query<(), (With<EnemyAi>, Without<Sinking>)>,
@@ -99,7 +97,6 @@ pub fn maintain_fleet(
         let to_player = player.translation - position;
         let boss = ship::spawn_ship(
             &mut commands,
-            &assets,
             ship::dreadnought_layout(),
             position,
             (-to_player.z).atan2(to_player.x),
@@ -135,7 +132,6 @@ pub fn maintain_fleet(
         let yaw = (-to_player.z).atan2(to_player.x);
         let hostile = ship::spawn_ship(
             &mut commands,
-            &assets,
             (class.layout)(),
             position,
             yaw,
@@ -153,7 +149,6 @@ pub struct DemoMode;
 
 pub fn demo_pilot(
     mut commands: Commands,
-    assets: Res<GameAssets>,
     mut stats: ResMut<GameStats>,
     targets: Query<&Transform, (With<EnemyAi>, Without<Sinking>, Without<PlayerShip>)>,
     mut players: Query<
@@ -164,7 +159,7 @@ pub fn demo_pilot(
 ) {
     // Auto-relaunch after going down, like a player pressing R.
     if any_player.is_empty() {
-        ship::spawn_player(&mut commands, &assets, stats.tier, Vec3::ZERO, 0.0);
+        ship::spawn_player(&mut commands, stats.tier, Vec3::ZERO, 0.0);
         stats.player_sunk = false;
         return;
     }

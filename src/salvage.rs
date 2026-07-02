@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use crate::assets::GameAssets;
 use crate::blocks::BlockId;
 use crate::combat::{GameStats, Sinking};
-use crate::ship::{self, PLAYER_CLASSES, PlayerShip, Ship, ShipVoxels, UPGRADE_COSTS, Voxel};
+use crate::ship::{self, PLAYER_CLASSES, PlayerShip, Ship, ShipVoxels, UPGRADE_COSTS};
 
 /// How close (flat distance) a piece must drift before it's collected.
 const COLLECT_RANGE: f32 = 3.0;
@@ -55,17 +55,16 @@ pub fn spawn_flotsam(commands: &mut Commands, assets: &GameAssets, id: BlockId, 
 pub fn update_flotsam(
     mut commands: Commands,
     time: Res<Time>,
-    assets: Res<GameAssets>,
     sounds: Res<crate::audio::SoundBank>,
     mut stats: ResMut<GameStats>,
     mut flotsam: Query<(Entity, &mut Flotsam, &mut Transform), Without<Ship>>,
     mut players: Query<
-        (Entity, &Transform, &mut ShipVoxels),
+        (&Transform, &mut ShipVoxels),
         (With<PlayerShip>, Without<Sinking>, Without<Flotsam>),
     >,
 ) {
     let dt = time.delta_secs();
-    let t = time.elapsed_secs();
+    let t = time.elapsed_secs_wrapped();
     let mut player = players.single_mut().ok();
 
     for (entity, mut piece, mut transform) in &mut flotsam {
@@ -79,7 +78,7 @@ pub fn update_flotsam(
             + (t * 1.2 + piece.phase).sin() * 0.05;
         transform.rotate_y(0.4 * dt);
 
-        let Some((ship_entity, ship_transform, voxels)) = player.as_mut() else {
+        let Some((ship_transform, voxels)) = player.as_mut() else {
             continue;
         };
         let mut to_ship = ship_transform.translation - transform.translation;
@@ -89,14 +88,7 @@ pub fn update_flotsam(
             transform.translation += to_ship / distance * (MAGNET_PULL * dt);
         }
         if distance < COLLECT_RANGE {
-            collect(
-                &mut commands,
-                &assets,
-                &mut stats,
-                *ship_entity,
-                voxels,
-                piece.id,
-            );
+            collect(&mut stats, voxels, piece.id);
             crate::audio::play(&mut commands, &sounds.ding, 0.45);
             commands.entity(entity).despawn();
         }
@@ -106,14 +98,7 @@ pub fn update_flotsam(
 /// One collected piece repairs the lowest missing cell of the ship's plan
 /// (hull before superstructure); with nothing to repair it banks salvage
 /// worth the piece's registry cost.
-fn collect(
-    commands: &mut Commands,
-    assets: &GameAssets,
-    stats: &mut GameStats,
-    ship_entity: Entity,
-    voxels: &mut ShipVoxels,
-    piece_id: BlockId,
-) {
+fn collect(stats: &mut GameStats, voxels: &mut ShipVoxels, piece_id: BlockId) {
     let missing = voxels
         .plan
         .iter()
@@ -122,15 +107,7 @@ fn collect(
         .map(|(cell, id)| (*cell, *id));
 
     if let Some((cell, id)) = missing {
-        let child = commands
-            .spawn((
-                Mesh3d(assets.cube.clone()),
-                MeshMaterial3d(assets.block_materials[&id].clone()),
-                Transform::from_translation(voxels.local_offset(cell)),
-                ChildOf(ship_entity),
-            ))
-            .id();
-        voxels.blocks.insert(cell, Voxel { id, entity: child });
+        voxels.blocks.insert(cell, id);
     } else {
         stats.salvage += crate::blocks::def(piece_id).cost;
     }
@@ -140,7 +117,6 @@ fn collect(
 /// salvage source; despawn ones left far behind.
 pub fn maintain_derelicts(
     mut commands: Commands,
-    assets: Res<GameAssets>,
     mut director: ResMut<DerelictDirector>,
     derelicts: Query<(Entity, &Transform), (With<Derelict>, Without<Sinking>)>,
     players: Query<&Transform, With<PlayerShip>>,
@@ -164,7 +140,6 @@ pub fn maintain_derelicts(
         let layout = layouts[director.spawned as usize % layouts.len()]();
         let wreck = ship::spawn_ship(
             &mut commands,
-            &assets,
             weathered(layout, director.spawned as f32 * 17.3),
             (player.translation + offset).with_y(0.0),
             bearing * 1.9,
@@ -200,7 +175,6 @@ fn weathered(
 /// The new ship launches where the old one sailed, fully repaired.
 pub fn upgrade_player(
     mut commands: Commands,
-    assets: Res<GameAssets>,
     sounds: Res<crate::audio::SoundBank>,
     mut stats: ResMut<GameStats>,
     players: Query<(Entity, &Transform, &Ship), (With<PlayerShip>, Without<Sinking>)>,
@@ -220,7 +194,6 @@ pub fn upgrade_player(
     commands.entity(entity).despawn();
     ship::spawn_player(
         &mut commands,
-        &assets,
         stats.tier,
         transform.translation.with_y(0.0),
         old_ship.yaw,

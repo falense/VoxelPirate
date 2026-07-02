@@ -17,23 +17,19 @@ Format per entry:
 
 ## Open
 
-## Remaining graphics upgrades — parked 2026-07-02
-**Blocked work:** none (independent polish items).
-**Context:** Sondre asked for richer graphics; of the four candidates, the
-living ocean, physical sky/bloom, and per-block PBR materials shipped in
-spec 004. The rest were parked when the direction question went unanswered:
-**Options:**
-- A: Wakes & combat feedback — foam wake + bow spray, cannonball smoke
-  trails, camera shake on hits. Pure feel; cheap particles.
-- B: Procedural block textures — code-generated wood grain / plank seams /
-  canvas weave, pushing toward the Minecraft look (colors alone read flat
-  up close).
-- C: Stop here and return to gameplay (structural connectivity, real
-  buoyancy).
-**Recommendation:** A — motion feedback compounds with the new swell, and
-the sea still looks empty behind a moving ship.
+## Wakes & combat feedback — parked 2026-07-02
+**Blocked work:** none (independent polish item).
+**Context:** the last unbuilt graphics upgrade — foam wake + bow spray,
+cannonball smoke trails, camera shake on hits. Pure feel; cheap particles.
+Recommended next polish step: motion feedback compounds with the swell,
+and the sea still looks empty behind a moving ship.
 
 ## Resolved
+
+- **Graphics upgrade menu** — of the four candidates offered 2026-07-02,
+  living ocean + physical sky/bloom + PBR materials shipped in spec 004,
+  and procedural block textures shipped in spec 005 (Sondre asked for
+  textures explicitly). Only wakes & combat feedback remains (above).
 
 - **Scavenging mechanic shape** — Option A (sunk ships scatter floating
   flotsam you sail over to collect), chosen by Sondre 2026-06-13. Option B

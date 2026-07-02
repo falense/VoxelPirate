@@ -29,17 +29,15 @@ pub struct Helm {
 #[derive(Component)]
 pub struct PlayerShip;
 
-pub struct Voxel {
-    pub id: BlockId,
-    /// The child entity rendering this block's cube.
-    pub entity: Entity,
-}
-
 /// The ship's voxel grid in local block coordinates. Block (0,0,0) is the
 /// aft-port-bottom corner; y = 0 is the layer at the waterline.
+///
+/// The grid is pure data: rendering is two ship-wide meshes rebuilt by
+/// [`remesh_ships`] whenever this component changes (Bevy change detection),
+/// so systems just mutate `blocks` and the visuals follow.
 #[derive(Component)]
 pub struct ShipVoxels {
-    pub blocks: HashMap<IVec3, Voxel>,
+    pub blocks: HashMap<IVec3, BlockId>,
     /// The as-designed layout; cells present here but missing from `blocks`
     /// are battle damage that salvage can repair.
     pub plan: HashMap<IVec3, BlockId>,
@@ -120,7 +118,6 @@ pub const UPGRADE_COSTS: [u32; 3] = [20, 60, 140];
 /// so the hull rolls about its midpoint; grid y = 1 sits on the waterline.
 pub fn spawn_ship(
     commands: &mut Commands,
-    assets: &GameAssets,
     layout: HashMap<IVec3, BlockId>,
     position: Vec3,
     yaw: f32,
@@ -152,30 +149,6 @@ pub fn spawn_ship(
         ))
         .id();
 
-    let mut blocks = HashMap::new();
-    commands.entity(ship).with_children(|parent| {
-        for (pos, id) in &layout {
-            let mut cube = parent.spawn((
-                Mesh3d(assets.cube.clone()),
-                MeshMaterial3d(assets.block_materials[id].clone()),
-                Transform::from_translation(
-                    (pos.as_vec3() + Vec3::splat(0.5)) * BLOCK_SIZE - center,
-                ),
-            ));
-            // Translucent blocks (sails) would otherwise cast opaque shadows.
-            if crate::blocks::def(*id).color.alpha() < 1.0 {
-                cube.insert(bevy::light::NotShadowCaster);
-            }
-            blocks.insert(
-                *pos,
-                Voxel {
-                    id: *id,
-                    entity: cube.id(),
-                },
-            );
-        }
-    });
-
     let radius = layout
         .keys()
         .map(|pos| {
@@ -186,12 +159,176 @@ pub fn spawn_ship(
         .fold(0.0_f32, f32::max)
         + 0.5;
     commands.entity(ship).insert(ShipVoxels {
-        blocks,
+        blocks: layout.clone(),
         plan: layout,
         center,
         radius,
     });
     ship
+}
+
+/// Handles to a ship's two render meshes: all opaque blocks in one
+/// atlas-textured mesh, translucent blocks (sails) in a second blended,
+/// non-shadow-casting one. Two draw calls per ship instead of an entity
+/// per cube — the difference between a fleet and a slideshow.
+#[derive(Component)]
+pub struct ShipMeshes {
+    opaque: Handle<Mesh>,
+    translucent: Handle<Mesh>,
+}
+
+/// (Re)build the render meshes of any ship whose voxel grid changed this
+/// frame — spawning, cannon damage, ramming, building, salvage repair. Only
+/// faces exposed to air (or showing through a translucent neighbour) are
+/// emitted, so solid hull interiors cost nothing.
+pub fn remesh_ships(
+    mut commands: Commands,
+    assets: Res<GameAssets>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    ships: Query<(Entity, &ShipVoxels, Option<&ShipMeshes>), Changed<ShipVoxels>>,
+) {
+    for (entity, voxels, handles) in &ships {
+        let opaque = build_ship_mesh(voxels, false);
+        let translucent = build_ship_mesh(voxels, true);
+        match handles {
+            Some(handles) => {
+                let _ = meshes.insert(&handles.opaque, opaque);
+                let _ = meshes.insert(&handles.translucent, translucent);
+            }
+            None => {
+                let opaque = meshes.add(opaque);
+                let translucent = meshes.add(translucent);
+                commands.entity(entity).with_children(|parent| {
+                    parent.spawn((
+                        Mesh3d(opaque.clone()),
+                        MeshMaterial3d(assets.atlas_opaque.clone()),
+                        Transform::IDENTITY,
+                    ));
+                    parent.spawn((
+                        Mesh3d(translucent.clone()),
+                        MeshMaterial3d(assets.atlas_translucent.clone()),
+                        Transform::IDENTITY,
+                        // Translucent sails shouldn't cast opaque shadows.
+                        bevy::light::NotShadowCaster,
+                    ));
+                });
+                commands.entity(entity).insert(ShipMeshes {
+                    opaque,
+                    translucent,
+                });
+            }
+        }
+    }
+}
+
+/// Cube face table: outward normal and the four corners of that face
+/// (relative to the cube center, CCW seen from outside).
+const FACES: [(IVec3, [Vec3; 4]); 6] = [
+    (
+        IVec3::X,
+        [
+            Vec3::new(0.5, -0.5, 0.5),
+            Vec3::new(0.5, -0.5, -0.5),
+            Vec3::new(0.5, 0.5, -0.5),
+            Vec3::new(0.5, 0.5, 0.5),
+        ],
+    ),
+    (
+        IVec3::NEG_X,
+        [
+            Vec3::new(-0.5, -0.5, -0.5),
+            Vec3::new(-0.5, -0.5, 0.5),
+            Vec3::new(-0.5, 0.5, 0.5),
+            Vec3::new(-0.5, 0.5, -0.5),
+        ],
+    ),
+    (
+        IVec3::Y,
+        [
+            Vec3::new(-0.5, 0.5, 0.5),
+            Vec3::new(0.5, 0.5, 0.5),
+            Vec3::new(0.5, 0.5, -0.5),
+            Vec3::new(-0.5, 0.5, -0.5),
+        ],
+    ),
+    (
+        IVec3::NEG_Y,
+        [
+            Vec3::new(-0.5, -0.5, -0.5),
+            Vec3::new(0.5, -0.5, -0.5),
+            Vec3::new(0.5, -0.5, 0.5),
+            Vec3::new(-0.5, -0.5, 0.5),
+        ],
+    ),
+    (
+        IVec3::Z,
+        [
+            Vec3::new(-0.5, -0.5, 0.5),
+            Vec3::new(0.5, -0.5, 0.5),
+            Vec3::new(0.5, 0.5, 0.5),
+            Vec3::new(-0.5, 0.5, 0.5),
+        ],
+    ),
+    (
+        IVec3::NEG_Z,
+        [
+            Vec3::new(0.5, -0.5, -0.5),
+            Vec3::new(-0.5, -0.5, -0.5),
+            Vec3::new(-0.5, 0.5, -0.5),
+            Vec3::new(0.5, 0.5, -0.5),
+        ],
+    ),
+];
+
+/// Mesh one translucency class of a ship's blocks: every block face that is
+/// exposed (no neighbour, or an opaque face showing through a translucent
+/// neighbour), textured from the block's atlas tile.
+fn build_ship_mesh(voxels: &ShipVoxels, translucent: bool) -> Mesh {
+    let is_translucent = |id: BlockId| crate::blocks::def(id).color.alpha() < 1.0;
+    let mut positions: Vec<[f32; 3]> = Vec::new();
+    let mut normals: Vec<[f32; 3]> = Vec::new();
+    let mut uvs: Vec<[f32; 2]> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+    for (cell, id) in &voxels.blocks {
+        if is_translucent(*id) != translucent {
+            continue;
+        }
+        let center = voxels.local_offset(*cell);
+        let (uv_min, uv_max) = crate::assets::tile_uv(*id);
+        for (normal, corners) in FACES {
+            let visible = match voxels.blocks.get(&(*cell + normal)) {
+                None => true,
+                // A face against a translucent neighbour still shows
+                // through it; anything behind an opaque block never does.
+                Some(neighbor) => !translucent && is_translucent(*neighbor),
+            };
+            if !visible {
+                continue;
+            }
+            let base = positions.len() as u32;
+            for (k, corner) in corners.into_iter().enumerate() {
+                positions.push((center + corner * BLOCK_SIZE).to_array());
+                normals.push(normal.as_vec3().to_array());
+                let (u, v) = match k {
+                    0 => (uv_min.x, uv_max.y),
+                    1 => (uv_max.x, uv_max.y),
+                    2 => (uv_max.x, uv_min.y),
+                    _ => (uv_min.x, uv_min.y),
+                };
+                uvs.push([u, v]);
+            }
+            indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+        }
+    }
+    let mut mesh = Mesh::new(
+        bevy::mesh::PrimitiveTopology::TriangleList,
+        bevy::asset::RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(bevy::mesh::Indices::U32(indices));
+    mesh
 }
 
 /// A tall-ship recipe (Spec 002). `build` turns one of these into a tapered,
@@ -539,17 +676,10 @@ pub fn dreadnought_layout() -> HashMap<IVec3, BlockId> {
 }
 
 /// Spawn the player's ship for the given upgrade tier.
-pub fn spawn_player(
-    commands: &mut Commands,
-    assets: &GameAssets,
-    tier: usize,
-    position: Vec3,
-    yaw: f32,
-) -> Entity {
+pub fn spawn_player(commands: &mut Commands, tier: usize, position: Vec3, yaw: f32) -> Entity {
     let class = &PLAYER_CLASSES[tier];
     let ship = spawn_ship(
         commands,
-        assets,
         (class.layout)(),
         position,
         yaw,
@@ -560,8 +690,8 @@ pub fn spawn_player(
     ship
 }
 
-pub fn spawn_player_start(mut commands: Commands, assets: Res<GameAssets>, stats: Res<GameStats>) {
-    spawn_player(&mut commands, &assets, stats.tier, Vec3::ZERO, 0.0);
+pub fn spawn_player_start(mut commands: Commands, stats: Res<GameStats>) {
+    spawn_player(&mut commands, stats.tier, Vec3::ZERO, 0.0);
 }
 
 /// WASD steers; Q/E fire broadsides for keyboard-only play (the primary
@@ -782,7 +912,8 @@ pub fn float_ships(
     time: Res<Time>,
     mut ships: Query<(&Ship, &ShipVoxels, &mut Transform), Without<Sinking>>,
 ) {
-    let t = time.elapsed_secs();
+    // Wrapped, to stay in phase with the GPU ocean's `globals.time`.
+    let t = time.elapsed_secs_wrapped();
     for (ship, voxels, mut transform) in &mut ships {
         let draft = voxels.damage_fraction() * 0.7;
         let p = transform.translation.xz();
@@ -808,7 +939,6 @@ pub fn float_ships(
 pub fn respawn_player(
     keys: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
-    assets: Res<GameAssets>,
     mut stats: ResMut<GameStats>,
     players: Query<(Entity, Has<Sinking>), With<PlayerShip>>,
 ) {
@@ -821,6 +951,6 @@ pub fn respawn_player(
     for (entity, _) in &players {
         commands.entity(entity).despawn();
     }
-    spawn_player(&mut commands, &assets, stats.tier, Vec3::ZERO, 0.0);
+    spawn_player(&mut commands, stats.tier, Vec3::ZERO, 0.0);
     stats.player_sunk = false;
 }
