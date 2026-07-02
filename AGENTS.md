@@ -60,7 +60,9 @@ preference the user would have wanted to make.
    blast damage with debris, sinking, AI sloops in an endless skirmish loop)
 5. ✅ Enemy/derelict vessels to scavenge (flotsam economy, decision A);
    material tiers (oak/iron) and a Dreadnought boss with victory condition
+6. ✅ Dock interlude game loop: wave battles, then a safe builder phase at
+   a pier — repair, hull purchases, orbit camera (spec 006)
 
 Next ideas: structural connectivity (cut-off blocks break away), real
 buoyancy (roadmap 2), boarding/stripping disabled ships (decision B),
-greedy meshing, gamepad support.
+wakes & combat feedback (parked in DECISIONS.md), gamepad support.

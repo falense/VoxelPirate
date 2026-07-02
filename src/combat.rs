@@ -241,6 +241,7 @@ pub fn fire_cannons(
 pub fn update_cannonballs(
     mut commands: Commands,
     time: Res<Time>,
+    sea_state: Res<crate::dock::SeaState>,
     assets: Res<GameAssets>,
     sounds: Res<crate::audio::SoundBank>,
     mut stats: ResMut<GameStats>,
@@ -338,7 +339,8 @@ pub fn update_cannonballs(
                 continue 'balls;
             }
 
-            let sea = crate::ocean::wave_height(point.xz(), time.elapsed_secs_wrapped());
+            let sea = crate::ocean::wave_height(point.xz(), time.elapsed_secs_wrapped())
+                * sea_state.current;
             if point.y < sea {
                 spawn_effect(
                     &mut commands,

@@ -26,6 +26,11 @@ and the sea still looks empty behind a moving ship.
 
 ## Resolved
 
+- **Game-flow shape (dock interlude)** — chosen by Sondre 2026-07-02:
+  wave-based matches, hull classes as explicit dock purchases (auto-upgrade
+  removed), and a dedicated dock scene (calm cove + pier + orbit camera)
+  rather than freezing the battle in place. Spec 006.
+
 - **Graphics upgrade menu** — of the four candidates offered 2026-07-02,
   living ocean + physical sky/bloom + PBR materials shipped in spec 004,
   and procedural block textures shipped in spec 005 (Sondre asked for

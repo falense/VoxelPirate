@@ -19,114 +19,102 @@ pub struct EnemyAi;
 #[derive(Component)]
 pub struct Dreadnought;
 
-/// Player kill count that summons the Dreadnought.
-const BOSS_AT_KILLS: u32 = 15;
-
-#[derive(Resource, Default)]
-pub struct FleetDirector {
-    spawned: u32,
-    /// Highest class index already announced, so each new hostile type gets
-    /// one "sighted!" call-out.
-    announced: usize,
-    boss_spawned: bool,
-}
-
 /// Hostile classes. Enemies reload slower and sail slower than the player's
 /// equivalent hull: a careful player wins outnumbered fights.
+#[derive(Clone, Copy)]
 struct EnemyClass {
-    name: &'static str,
     layout: fn() -> HashMap<IVec3, BlockId>,
     reload: f32,
     top_speed: f32,
-    /// Player kill count at which this class starts appearing.
-    unlock_kills: u32,
+    boss: bool,
 }
 
-const ENEMY_CLASSES: [EnemyClass; 3] = [
-    EnemyClass {
-        name: "sloop",
-        layout: ship::sloop_layout,
-        reload: 6.0,
-        top_speed: 5.0,
-        unlock_kills: 0,
-    },
-    EnemyClass {
-        name: "brig",
-        layout: ship::brig_layout,
-        reload: 5.5,
-        top_speed: 5.4,
-        unlock_kills: 4,
-    },
-    EnemyClass {
-        name: "frigate",
-        layout: ship::frigate_layout,
-        reload: 5.0,
-        top_speed: 5.8,
-        unlock_kills: 10,
-    },
-];
+const SLOOP: EnemyClass = EnemyClass {
+    layout: ship::sloop_layout,
+    reload: 6.0,
+    top_speed: 5.0,
+    boss: false,
+};
+const BRIG: EnemyClass = EnemyClass {
+    layout: ship::brig_layout,
+    reload: 5.5,
+    top_speed: 5.4,
+    boss: false,
+};
+const FRIGATE: EnemyClass = EnemyClass {
+    layout: ship::frigate_layout,
+    reload: 5.0,
+    top_speed: 5.8,
+    boss: false,
+};
+const DREADNOUGHT: EnemyClass = EnemyClass {
+    layout: ship::dreadnought_layout,
+    reload: 5.0,
+    top_speed: 4.6,
+    boss: true,
+};
 
-/// Keep the hostile fleet topped up: it grows from two to four ships as the
-/// player racks up kills, and tougher classes join the rotation. Spawn
-/// bearings step around a golden-angle sequence so reinforcements don't
-/// always come from the same direction.
-pub fn maintain_fleet(
+/// The Dreadnought's wave; sink it there and the campaign is won, but the
+/// seas keep escalating for as long as you keep sailing out.
+pub const BOSS_WAVE: u32 = 8;
+
+/// What sails out against the player in a given wave. Waves 1-8 are a
+/// hand-tuned ramp to the Dreadnought; past that a strength budget keeps
+/// growing, with another Dreadnought joining every eighth wave.
+fn wave_composition(wave: u32) -> Vec<EnemyClass> {
+    match wave {
+        1 => vec![SLOOP, SLOOP],
+        2 => vec![SLOOP, SLOOP, SLOOP],
+        3 => vec![BRIG, SLOOP, SLOOP],
+        4 => vec![BRIG, BRIG, SLOOP],
+        5 => vec![BRIG, BRIG, BRIG],
+        6 => vec![FRIGATE, BRIG, BRIG],
+        7 => vec![FRIGATE, FRIGATE, BRIG],
+        8 => vec![DREADNOUGHT, FRIGATE],
+        wave => {
+            let mut fleet = Vec::new();
+            let mut budget = 6 + (wave - 8) as i32;
+            if wave.is_multiple_of(8) {
+                fleet.push(DREADNOUGHT);
+                budget -= 6;
+            }
+            while budget > 0 && fleet.len() < 5 {
+                let class = match budget {
+                    1 => SLOOP,
+                    2 => BRIG,
+                    _ => FRIGATE,
+                };
+                budget -= match budget {
+                    1 => 1,
+                    2 => 2,
+                    _ => 3,
+                };
+                fleet.push(class);
+            }
+            fleet
+        }
+    }
+}
+
+/// Entering battle: the whole wave sails over the horizon at once, spread
+/// around the compass on golden-angle bearings so it can't be memorized.
+pub fn spawn_wave(
     mut commands: Commands,
-    time: Res<Time>,
     mut stats: ResMut<GameStats>,
-    mut director: ResMut<FleetDirector>,
-    enemies: Query<(), (With<EnemyAi>, Without<Sinking>)>,
+    mut director: ResMut<crate::dock::WaveDirector>,
     players: Query<&Transform, With<PlayerShip>>,
 ) {
-    // A short grace period after launch: let the player find the helm
-    // before the first hostiles appear over the horizon.
-    if time.elapsed_secs() < 12.0 {
-        return;
-    }
+    director.battle_time = 0.0;
+    info!("WAVE {} spawning", director.wave);
     let Ok(player) = players.single() else {
         return;
     };
-
-    // The hunt's climax: one Dreadnought, summoned at BOSS_AT_KILLS.
-    if stats.kills >= BOSS_AT_KILLS && !director.boss_spawned && !stats.victory {
-        director.boss_spawned = true;
-        director.spawned += 1;
-        let bearing = director.spawned as f32 * 2.399963;
-        let offset = Vec3::new(bearing.cos(), 0.0, bearing.sin()) * (SPAWN_DISTANCE + 20.0);
-        let position = (player.translation + offset).with_y(0.0);
-        let to_player = player.translation - position;
-        let boss = ship::spawn_ship(
-            &mut commands,
-            ship::dreadnought_layout(),
-            position,
-            (-to_player.z).atan2(to_player.x),
-            5.0,
-            4.6,
-        );
-        commands.entity(boss).insert((EnemyAi, Dreadnought));
-        stats.announce("The DREADNOUGHT has come for you. Sink it and the seas are yours!");
-    }
-
-    let target_fleet = (2 + stats.kills as usize / 5).min(4);
-    let alive = enemies.iter().count();
-    if alive >= target_fleet {
-        return;
-    }
-    for _ in alive..target_fleet {
-        director.spawned += 1;
-        let unlocked: Vec<(usize, &EnemyClass)> = ENEMY_CLASSES
-            .iter()
-            .enumerate()
-            .filter(|(_, class)| stats.kills >= class.unlock_kills)
-            .collect();
-        let (class_index, class) = unlocked[director.spawned as usize % unlocked.len()];
-        if class_index > director.announced {
-            director.announced = class_index;
-            stats.announce(format!("A hostile {} has been sighted!", class.name));
-        }
-
-        let bearing = director.spawned as f32 * 2.399963; // golden angle
-        let offset = Vec3::new(bearing.cos(), 0.0, bearing.sin()) * SPAWN_DISTANCE;
+    let fleet = wave_composition(director.wave);
+    let count = fleet.len();
+    for (i, class) in fleet.into_iter().enumerate() {
+        let bearing = (director.wave * 3 + i as u32) as f32 * 2.399963; // golden angle
+        let distance = SPAWN_DISTANCE + if class.boss { 20.0 } else { 0.0 };
+        let offset = Vec3::new(bearing.cos(), 0.0, bearing.sin()) * distance;
         let position = (player.translation + offset).with_y(0.0);
         let to_player = player.translation - position;
         let yaw = (-to_player.z).atan2(to_player.x);
@@ -139,6 +127,17 @@ pub fn maintain_fleet(
             class.top_speed,
         );
         commands.entity(hostile).insert(EnemyAi);
+        if class.boss {
+            commands.entity(hostile).insert(Dreadnought);
+        }
+    }
+    if director.wave == BOSS_WAVE {
+        stats.announce("The DREADNOUGHT has come for you. Sink it and the seas are yours!");
+    } else {
+        stats.announce(format!(
+            "Wave {}: {count} hostile sails on the horizon!",
+            director.wave
+        ));
     }
 }
 
@@ -148,21 +147,12 @@ pub fn maintain_fleet(
 pub struct DemoMode;
 
 pub fn demo_pilot(
-    mut commands: Commands,
-    mut stats: ResMut<GameStats>,
     targets: Query<&Transform, (With<EnemyAi>, Without<Sinking>, Without<PlayerShip>)>,
     mut players: Query<
         (&Transform, &Ship, &mut Helm, &mut Broadsides),
         (With<PlayerShip>, Without<Sinking>, Without<EnemyAi>),
     >,
-    any_player: Query<(), With<PlayerShip>>,
 ) {
-    // Auto-relaunch after going down, like a player pressing R.
-    if any_player.is_empty() {
-        ship::spawn_player(&mut commands, stats.tier, Vec3::ZERO, 0.0);
-        stats.player_sunk = false;
-        return;
-    }
     let Ok((transform, player, mut helm, mut guns)) = players.single_mut() else {
         return;
     };
@@ -183,6 +173,30 @@ pub fn demo_pilot(
         &mut helm,
         &mut guns,
     );
+}
+
+/// `--demo` at the dock: repair, buy any affordable hull, and set sail —
+/// by pressing the dock's own keys, so the autopilot exercises exactly the
+/// player-facing flow.
+pub fn demo_dock(time: Res<Time>, mut delay: Local<f32>, mut keys: ResMut<ButtonInput<KeyCode>>) {
+    let before = *delay;
+    *delay += time.delta_secs();
+    let crossed = |mark: f32| before < mark && *delay >= mark;
+    if crossed(0.5) {
+        keys.press(KeyCode::KeyR);
+    }
+    if crossed(1.0) {
+        keys.release(KeyCode::KeyR);
+        keys.press(KeyCode::KeyU);
+    }
+    if crossed(1.5) {
+        keys.release(KeyCode::KeyU);
+        keys.press(KeyCode::Enter);
+    }
+    if crossed(2.0) {
+        keys.release(KeyCode::Enter);
+        *delay = 0.0;
+    }
 }
 
 /// Shared broadside-circling brain: close to gun range, hold the target

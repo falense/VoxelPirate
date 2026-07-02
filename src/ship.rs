@@ -690,10 +690,6 @@ pub fn spawn_player(commands: &mut Commands, tier: usize, position: Vec3, yaw: f
     ship
 }
 
-pub fn spawn_player_start(mut commands: Commands, stats: Res<GameStats>) {
-    spawn_player(&mut commands, stats.tier, Vec3::ZERO, 0.0);
-}
-
 /// WASD steers; Q/E fire broadsides for keyboard-only play (the primary
 /// firing control is the mouse, see [`player_fire_mouse`]).
 pub fn player_helm(
@@ -910,10 +906,13 @@ pub fn separate_ships(
 /// rather than cork-like. Battle damage makes a ship ride lower.
 pub fn float_ships(
     time: Res<Time>,
+    sea: Res<crate::dock::SeaState>,
     mut ships: Query<(&Ship, &ShipVoxels, &mut Transform), Without<Sinking>>,
 ) {
-    // Wrapped, to stay in phase with the GPU ocean's `globals.time`.
+    // Wrapped, to stay in phase with the GPU ocean's `globals.time`; scaled
+    // by the sea state so hulls sit flat in the sheltered cove.
     let t = time.elapsed_secs_wrapped();
+    let scale = sea.current;
     for (ship, voxels, mut transform) in &mut ships {
         let draft = voxels.damage_fraction() * 0.7;
         let p = transform.translation.xz();
@@ -921,36 +920,15 @@ pub fn float_ships(
         let beam = Vec2::new(-forward.y, forward.x);
         let half_len = (voxels.radius * 0.7).max(2.0);
         let half_beam = (voxels.radius * 0.35).max(1.5);
-        transform.translation.y = crate::ocean::wave_height(p, t) - draft;
-        let bow = crate::ocean::wave_height(p + forward * half_len, t);
-        let stern = crate::ocean::wave_height(p - forward * half_len, t);
-        let starboard = crate::ocean::wave_height(p + beam * half_beam, t);
-        let port = crate::ocean::wave_height(p - beam * half_beam, t);
+        transform.translation.y = crate::ocean::wave_height(p, t) * scale - draft;
+        let bow = crate::ocean::wave_height(p + forward * half_len, t) * scale;
+        let stern = crate::ocean::wave_height(p - forward * half_len, t) * scale;
+        let starboard = crate::ocean::wave_height(p + beam * half_beam, t) * scale;
+        let port = crate::ocean::wave_height(p - beam * half_beam, t) * scale;
         let pitch = ((bow - stern) / (2.0 * half_len)).atan() * 0.8;
         let roll = ((port - starboard) / (2.0 * half_beam)).atan() * 0.6;
         transform.rotation = Quat::from_rotation_y(ship.yaw)
             * Quat::from_rotation_z(pitch)
             * Quat::from_rotation_x(roll);
     }
-}
-
-/// After the player's ship has gone down, R launches a fresh ship of the
-/// same tier — death costs banked salvage progress only in time.
-pub fn respawn_player(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut commands: Commands,
-    mut stats: ResMut<GameStats>,
-    players: Query<(Entity, Has<Sinking>), With<PlayerShip>>,
-) {
-    if !keys.just_pressed(KeyCode::KeyR) {
-        return;
-    }
-    if players.iter().any(|(_, sinking)| !sinking) {
-        return;
-    }
-    for (entity, _) in &players {
-        commands.entity(entity).despawn();
-    }
-    spawn_player(&mut commands, stats.tier, Vec3::ZERO, 0.0);
-    stats.player_sunk = false;
 }

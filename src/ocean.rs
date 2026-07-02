@@ -39,6 +39,18 @@ impl Default for OceanExtension {
     }
 }
 
+impl OceanExtension {
+    /// Scale the swell amplitudes over the base table (sea state: calm
+    /// cove vs open water). Keep in step with the CPU side, which scales
+    /// [`wave_height`] results by the same factor.
+    pub fn set_amplitude_scale(&mut self, scale: f32) {
+        let base = Self::default();
+        self.swell_a.w = base.swell_a.w * scale;
+        self.swell_b.w = base.swell_b.w * scale;
+        self.swell_c.w = base.swell_c.w * scale;
+    }
+}
+
 impl MaterialExtension for OceanExtension {
     fn vertex_shader() -> ShaderRef {
         OCEAN_SHADER_HANDLE.into()

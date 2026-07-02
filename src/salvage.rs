@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use crate::assets::GameAssets;
 use crate::blocks::BlockId;
 use crate::combat::{GameStats, Sinking};
-use crate::ship::{self, PLAYER_CLASSES, PlayerShip, Ship, ShipVoxels, UPGRADE_COSTS};
+use crate::ship::{self, PlayerShip, Ship, ShipVoxels};
 
 /// How close (flat distance) a piece must drift before it's collected.
 const COLLECT_RANGE: f32 = 3.0;
@@ -16,7 +16,7 @@ const MAGNET_PULL: f32 = 7.0;
 /// block's registry cost — a scavenged cannon is a prize.
 #[derive(Component)]
 pub struct Flotsam {
-    id: BlockId,
+    pub id: BlockId,
     age: f32,
     phase: f32,
 }
@@ -55,6 +55,7 @@ pub fn spawn_flotsam(commands: &mut Commands, assets: &GameAssets, id: BlockId, 
 pub fn update_flotsam(
     mut commands: Commands,
     time: Res<Time>,
+    sea: Res<crate::dock::SeaState>,
     sounds: Res<crate::audio::SoundBank>,
     mut stats: ResMut<GameStats>,
     mut flotsam: Query<(Entity, &mut Flotsam, &mut Transform), Without<Ship>>,
@@ -74,6 +75,7 @@ pub fn update_flotsam(
             continue;
         }
         transform.translation.y = crate::ocean::wave_height(transform.translation.xz(), t)
+            * sea.current
             + 0.12
             + (t * 1.2 + piece.phase).sin() * 0.05;
         transform.rotate_y(0.4 * dt);
@@ -169,39 +171,4 @@ fn weathered(
         h > 0.35
     });
     layout
-}
-
-/// Spend banked salvage on the next hull class as soon as it's affordable.
-/// The new ship launches where the old one sailed, fully repaired.
-pub fn upgrade_player(
-    mut commands: Commands,
-    sounds: Res<crate::audio::SoundBank>,
-    mut stats: ResMut<GameStats>,
-    players: Query<(Entity, &Transform, &Ship), (With<PlayerShip>, Without<Sinking>)>,
-) {
-    if stats.tier >= UPGRADE_COSTS.len() {
-        return;
-    }
-    let cost = UPGRADE_COSTS[stats.tier];
-    if stats.salvage < cost {
-        return;
-    }
-    let Ok((entity, transform, old_ship)) = players.single() else {
-        return;
-    };
-    stats.salvage -= cost;
-    stats.tier += 1;
-    commands.entity(entity).despawn();
-    ship::spawn_player(
-        &mut commands,
-        stats.tier,
-        transform.translation.with_y(0.0),
-        old_ship.yaw,
-    );
-    let message = format!(
-        "Salvage spent — {} launched!",
-        PLAYER_CLASSES[stats.tier].name
-    );
-    stats.announce(message);
-    crate::audio::play(&mut commands, &sounds.fanfare, 0.6);
 }

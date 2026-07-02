@@ -46,7 +46,7 @@ pub fn setup_hud(mut commands: Commands) {
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(12.0),
-            top: Val::Px(34.0),
+            top: Val::Px(56.0),
             ..default()
         },
     ));
@@ -61,7 +61,7 @@ pub fn setup_hud(mut commands: Commands) {
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(12.0),
-            top: Val::Px(58.0),
+            top: Val::Px(82.0),
             ..default()
         },
     ));
@@ -89,6 +89,8 @@ pub fn setup_hud(mut commands: Commands) {
 pub fn update_hud(
     time: Res<Time>,
     virtual_time: Res<Time<Virtual>>,
+    phase: Res<State<crate::dock::GamePhase>>,
+    waves: Res<crate::dock::WaveDirector>,
     mode: Res<crate::build::PlayMode>,
     build_state: Res<crate::build::BuildState>,
     mut stats: ResMut<GameStats>,
@@ -100,54 +102,67 @@ pub fn update_hud(
     stats.announce_ttl = (stats.announce_ttl - time.delta_secs()).max(0.0);
 
     if let Ok(mut text) = controls.single_mut() {
-        text.0 = match *mode {
-            crate::build::PlayMode::Sail => {
-                "WASD sail  ·  click fires the broadside facing the cursor  ·  scroll zoom  ·  Tab: build mode".into()
-            }
-            crate::build::PlayMode::Build => {
-                let def = crate::blocks::def(build_state.selected);
+        let at_dock = *phase.get() == crate::dock::GamePhase::Dock;
+        text.0 = if at_dock {
+            let def = crate::blocks::def(build_state.selected);
+            let upgrade = if stats.tier + 1 < PLAYER_CLASSES.len() {
                 format!(
-                    "BUILD MODE — 1-0 select block  ·  click place ({} costs {})  ·  right-click remove (refund)  ·  Tab: sail",
-                    def.name, def.cost,
+                    "  ·  U: buy {} ({})",
+                    PLAYER_CLASSES[stats.tier + 1].name,
+                    UPGRADE_COSTS[stats.tier]
                 )
+            } else {
+                String::new()
+            };
+            format!(
+                "AT THE DOCK — 1-0 select block  ·  click place ({} costs {})  ·  right-click remove{upgrade}  ·  R: repair  ·  WASD orbit + scroll  ·  ENTER: set sail",
+                def.name, def.cost,
+            )
+        } else {
+            match *mode {
+                crate::build::PlayMode::Sail => {
+                    "WASD sail  ·  click fires the broadside facing the cursor  ·  scroll zoom  ·  Tab: build mode".into()
+                }
+                crate::build::PlayMode::Build => {
+                    let def = crate::blocks::def(build_state.selected);
+                    format!(
+                        "BUILD MODE — 1-0 select block  ·  click place ({} costs {})  ·  right-click remove (refund)  ·  Tab: sail",
+                        def.name, def.cost,
+                    )
+                }
             }
         };
     }
 
     if let Ok(mut text) = status.single_mut() {
-        let salvage = if stats.tier < UPGRADE_COSTS.len() {
-            format!(
-                "Salvage {}/{} ({} next)",
-                stats.salvage,
-                UPGRADE_COSTS[stats.tier],
-                PLAYER_CLASSES[stats.tier + 1].name,
-            )
-        } else {
-            format!("Salvage {}", stats.salvage)
-        };
+        let salvage = format!("Salvage {}", stats.salvage);
         let crown = if stats.victory {
             "   ☠ Dreadnought defeated"
         } else {
             ""
         };
+        let wave = match *phase.get() {
+            crate::dock::GamePhase::Dock => format!("Wave {} next", waves.wave),
+            crate::dock::GamePhase::Battle => format!("Wave {}", waves.wave),
+        };
         if let Ok((voxels, guns)) = players.single() {
             let hull = (1.0 - voxels.damage_fraction()) * 100.0;
             text.0 = format!(
-                "{}   Hull {hull:.0}%   Port {}   Starboard {}   {salvage}   Ships sunk: {}{crown}",
+                "{}   {wave}   Hull {hull:.0}%   Port {}   Starboard {}   {salvage}   Ships sunk: {}{crown}",
                 PLAYER_CLASSES[stats.tier].name,
                 reload_label(guns.reload_port),
                 reload_label(guns.reload_starboard),
                 stats.kills,
             );
         } else {
-            text.0 = format!("{salvage}   Ships sunk: {}{crown}", stats.kills);
+            text.0 = format!("{wave}   {salvage}   Ships sunk: {}{crown}", stats.kills);
         }
     }
     if let Ok(mut text) = center.single_mut() {
         text.0 = if virtual_time.is_paused() {
             "PAUSED — P to resume".into()
         } else if stats.player_sunk {
-            "Your ship went down!  Press R to set sail again".into()
+            "Your ship is going down!".into()
         } else if stats.announce_ttl > 0.0 {
             stats.announcement.clone()
         } else {
