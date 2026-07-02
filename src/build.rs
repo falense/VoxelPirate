@@ -58,9 +58,10 @@ pub fn toggle_mode(keys: Res<ButtonInput<KeyCode>>, mut mode: ResMut<PlayMode>) 
     }
 }
 
-/// In build mode: 1-6 select a block type, left click places it on the face
-/// under the cursor (costs the block's salvage price), right click removes
-/// the targeted block for a refund. The ghost cube previews the placement.
+/// In build mode: digits 1-0 select a block type (the first ten registry
+/// blocks), left click places it on the face under the cursor (costs the
+/// block's salvage price), right click removes the targeted block for a
+/// refund. The ghost cube previews the placement.
 pub fn build_input(
     mut commands: Commands,
     mode: Res<PlayMode>,
@@ -96,6 +97,8 @@ pub fn build_input(
         KeyCode::Digit6,
         KeyCode::Digit7,
         KeyCode::Digit8,
+        KeyCode::Digit9,
+        KeyCode::Digit0,
     ];
     for (key, id) in digits.iter().zip(blocks::ALL) {
         if keys.just_pressed(*key) {

@@ -211,10 +211,12 @@ struct ShipSpec {
     bow: i32,
     /// Stations over which the stern fills out to its transom.
     stern: i32,
-    /// Masts as (x station, pole height above the deck).
+    /// Masts as (x station, pole height above the deck), aft-most first —
+    /// the first entry carries the spanker on castled ships.
     masts: &'static [(i32, i32)],
-    /// Cannons per side, spaced evenly along the rail amidships.
-    guns_per_side: i32,
+    /// The guns mounted along each rail, aft to fore; both sides carry the
+    /// same battery. Mixing gun blocks mixes shot types in one broadside.
+    battery: &'static [BlockId],
     /// Whether to raise a quarterdeck aft and a forecastle forward.
     castles: bool,
 }
@@ -256,6 +258,19 @@ fn build(spec: &ShipSpec) -> HashMap<IVec3, BlockId> {
         }
     }
 
+    // Wale: a tarred band along the topmost hull strake and around the
+    // transom — the classic dark stripe that makes the sheer line read.
+    let wale_y = spec.hull_height - 1;
+    let stern_half = half_width(spec, 0);
+    for x in 0..spec.length {
+        let half = half_width(spec, x);
+        m.insert(IVec3::new(x, wale_y, cz - half), BlockId::Trim);
+        m.insert(IVec3::new(x, wale_y, cz + half), BlockId::Trim);
+    }
+    for z in (cz - stern_half)..=(cz + stern_half) {
+        m.insert(IVec3::new(0, wale_y, z), BlockId::Trim);
+    }
+
     // Bulwarks: a raised rail down both sides; the open bow tip stays low.
     for x in 0..spec.length {
         let half = half_width(spec, x);
@@ -266,7 +281,6 @@ fn build(spec: &ShipSpec) -> HashMap<IVec3, BlockId> {
         m.insert(IVec3::new(x, rail_y, cz + half), spec.hull);
     }
     // Closed stern transom across the back.
-    let stern_half = half_width(spec, 0);
     for z in (cz - stern_half)..=(cz + stern_half) {
         m.insert(IVec3::new(0, rail_y, z), spec.hull);
     }
@@ -284,52 +298,90 @@ fn build(spec: &ShipSpec) -> HashMap<IVec3, BlockId> {
         raise_castle(&mut m, spec, cz, rail_y, f_start, f_end);
         waist_lo = q_len;
         waist_hi = f_start;
+
+        // Stern gallery: lantern-lit windows in the sterncastle bulkhead,
+        // a great lantern above them, and a gilded figurehead at the stem.
+        for z in (cz - stern_half)..=(cz + stern_half) {
+            if (z - cz).rem_euclid(2) == 1 {
+                m.insert(IVec3::new(0, rail_y + 1, z), BlockId::Lantern);
+            }
+        }
+        m.insert(IVec3::new(0, rail_y + 2, cz), BlockId::Lantern);
+        m.insert(IVec3::new(spec.length - 1, rail_y, cz), BlockId::Gold);
     }
 
-    // Gun ports: cannons evenly along the rail through the waist, both sides.
-    for i in 0..spec.guns_per_side {
-        let x = waist_lo + (waist_hi - waist_lo) * (i * 2 + 1) / (spec.guns_per_side * 2);
+    // Cargo hatch: a dark grating amidships, clear of the mast steps.
+    let mid = (waist_lo + waist_hi) / 2;
+    for x in [mid - 1, mid] {
+        if x > waist_lo && x < waist_hi && !spec.masts.iter().any(|&(mx, _)| mx == x) {
+            m.insert(IVec3::new(x, deck_y, cz), BlockId::Trim);
+        }
+    }
+
+    // Gun ports: the battery spaced evenly along the rail through the waist,
+    // the same mix on both sides.
+    let gun_count = spec.battery.len() as i32;
+    for (i, gun) in spec.battery.iter().enumerate() {
+        let x = waist_lo + (waist_hi - waist_lo) * (i as i32 * 2 + 1) / (gun_count * 2);
         let half = half_width(spec, x);
         if half <= 0 {
             continue;
         }
-        m.insert(IVec3::new(x, rail_y, cz - half), BlockId::Cannon);
-        m.insert(IVec3::new(x, rail_y, cz + half), BlockId::Cannon);
+        m.insert(IVec3::new(x, rail_y, cz - half), *gun);
+        m.insert(IVec3::new(x, rail_y, cz + half), *gun);
     }
 
-    // Masts: pole, two stacked square sails on yards, and a masthead pennant.
+    // Masts: pole, stacked square sails on yards (two on short masts, three
+    // on tall ones, narrowing aloft), and a masthead pennant.
     let sail_hw = (spec.beam - 1) / 2 + 1;
     for &(mx, mh) in spec.masts {
         for y in rail_y..=rail_y + mh {
             m.insert(IVec3::new(mx, y, cz), BlockId::Mast);
         }
         m.insert(IVec3::new(mx, rail_y + mh + 1, cz), BlockId::Flag);
-        add_sail(
-            &mut m,
-            mx,
-            cz,
-            sail_hw,
-            rail_y + mh / 3,
-            rail_y + mh * 3 / 5,
-        );
-        add_sail(
-            &mut m,
-            mx,
-            cz,
-            (sail_hw - 1).max(1),
-            rail_y + mh * 3 / 5 + 2,
-            rail_y + mh - 1,
-        );
+        let sails = if mh >= 9 { 3 } else { 2 };
+        let rig_lo = rail_y + mh / 4;
+        let rig_hi = rail_y + mh - 1;
+        let band = ((rig_hi - rig_lo + 1) / sails).max(1);
+        for s in 0..sails {
+            let y0 = rig_lo + s * (band + 1);
+            if y0 > rig_hi {
+                break;
+            }
+            add_sail(
+                &mut m,
+                mx,
+                cz,
+                (sail_hw - s).max(2),
+                y0,
+                (y0 + band - 1).min(rig_hi),
+            );
+        }
     }
 
-    // Bowsprit angling up and forward off the bow, carrying a small jib.
+    // Spanker: a fore-aft triangle of canvas trailing off the aft mast,
+    // the age-of-sail counterweight to all that square rig.
+    if spec.castles {
+        let (mx, mh) = spec.masts[0];
+        let gaff = rail_y + mh * 2 / 3;
+        for k in 1..=3 {
+            for y in (rail_y + 2)..=(gaff - k) {
+                m.entry(IVec3::new(mx - k, y, cz)).or_insert(BlockId::Sail);
+            }
+        }
+    }
+
+    // Bowsprit angling up and forward off the bow, carrying jib sails.
     let tip = spec.length - 1;
     for k in 1..=3 {
         m.insert(IVec3::new(tip + k, rail_y + k.min(2), cz), BlockId::Mast);
     }
-    m.insert(IVec3::new(tip + 1, rail_y + 1, cz - 1), BlockId::Sail);
-    m.insert(IVec3::new(tip + 1, rail_y + 1, cz + 1), BlockId::Sail);
-    m.insert(IVec3::new(tip + 2, rail_y + 2, cz), BlockId::Sail);
+    for k in 1..=2 {
+        m.insert(IVec3::new(tip + k, rail_y + k, cz - 1), BlockId::Sail);
+        m.insert(IVec3::new(tip + k, rail_y + k, cz + 1), BlockId::Sail);
+        m.entry(IVec3::new(tip + k, rail_y + k + 1, cz))
+            .or_insert(BlockId::Sail);
+    }
 
     m
 }
@@ -387,7 +439,7 @@ pub fn barge_layout() -> HashMap<IVec3, BlockId> {
         bow: 3,
         stern: 2,
         masts: &[(6, 6)],
-        guns_per_side: 2,
+        battery: &[BlockId::Cannon, BlockId::Cannon],
         castles: false,
     })
 }
@@ -402,7 +454,7 @@ pub fn brig_layout() -> HashMap<IVec3, BlockId> {
         bow: 4,
         stern: 3,
         masts: &[(5, 7), (10, 8)],
-        guns_per_side: 3,
+        battery: &[BlockId::Carronade, BlockId::Cannon, BlockId::Cannon],
         castles: true,
     })
 }
@@ -417,7 +469,12 @@ pub fn frigate_layout() -> HashMap<IVec3, BlockId> {
         bow: 5,
         stern: 4,
         masts: &[(5, 8), (10, 9), (15, 7)],
-        guns_per_side: 4,
+        battery: &[
+            BlockId::Culverin,
+            BlockId::Cannon,
+            BlockId::Cannon,
+            BlockId::Culverin,
+        ],
         castles: true,
     })
 }
@@ -432,7 +489,13 @@ pub fn galleon_layout() -> HashMap<IVec3, BlockId> {
         bow: 6,
         stern: 5,
         masts: &[(6, 9), (12, 11), (18, 8)],
-        guns_per_side: 5,
+        battery: &[
+            BlockId::Carronade,
+            BlockId::Cannon,
+            BlockId::Culverin,
+            BlockId::Cannon,
+            BlockId::Carronade,
+        ],
         castles: true,
     })
 }
@@ -447,7 +510,7 @@ pub fn sloop_layout() -> HashMap<IVec3, BlockId> {
         bow: 3,
         stern: 2,
         masts: &[(5, 6)],
-        guns_per_side: 2,
+        battery: &[BlockId::Cannon, BlockId::Cannon],
         castles: false,
     })
 }
@@ -462,7 +525,15 @@ pub fn dreadnought_layout() -> HashMap<IVec3, BlockId> {
         bow: 7,
         stern: 6,
         masts: &[(7, 10), (13, 13), (19, 12), (24, 9)],
-        guns_per_side: 7,
+        battery: &[
+            BlockId::Carronade,
+            BlockId::Culverin,
+            BlockId::Cannon,
+            BlockId::Cannon,
+            BlockId::Cannon,
+            BlockId::Culverin,
+            BlockId::Carronade,
+        ],
         castles: true,
     })
 }

@@ -7,17 +7,11 @@ use crate::blocks;
 use crate::ship::{BLOCK_SIZE, PlayerShip, Ship, ShipVoxels};
 
 const GRAVITY: f32 = 9.8;
-const CANNONBALL_SPEED: f32 = 22.0;
-/// Upward component added at the muzzle; with CANNONBALL_SPEED this gives a
-/// flat arc with roughly a 20-block range.
+/// Upward component added at the muzzle of a perpendicular volley; gun speed
+/// then sets the range, so slow carronades naturally fall short.
 const CANNONBALL_LOFT: f32 = 3.0;
-/// Blocks within this many cells of the impact cell are destroyed.
-const BLAST_RADIUS: f32 = 1.6;
 /// A ship sinks once it has lost this fraction of its designed blocks.
 const SINK_LOSS_FRACTION: f32 = 0.35;
-/// Quick-reject distance for ball/ship collision: farther than any block of
-/// the largest hull can be from its ship origin.
-const SHIP_BOUNDS_RADIUS: f32 = 15.0;
 /// How far a gun may swing off its beam (perpendicular) to bear on an aimed
 /// target, expressed as the minimum cosine of the bearing — cos(60°).
 const GUN_TRAVERSE_COS: f32 = 0.5;
@@ -106,6 +100,10 @@ pub struct CannonBall {
     pub velocity: Vec3,
     pub shooter: Entity,
     pub age: f32,
+    /// Blast radius at the impact, from the firing gun's [`blocks::GunDef`].
+    pub blast: f32,
+    /// Blocks the ball drills through beyond the impact cell.
+    pub pierce: i32,
 }
 
 /// A block knocked off a ship: tumbles, splashes down, and sinks.
@@ -160,9 +158,9 @@ pub fn fire_cannons(
         let ship_velocity = transform.rotation * Vec3::X * ship.speed;
         let (mut fired_port, mut fired_starboard) = (false, false);
         for (pos, voxel) in &voxels.blocks {
-            if !blocks::def(voxel.id).gun {
+            let Some(gun) = blocks::def(voxel.id).gun else {
                 continue;
-            }
+            };
             let port_side = (pos.z as f32 + 0.5) * BLOCK_SIZE < voxels.center.z;
             if (port_side && !want_port) || (!port_side && !want_starboard) {
                 continue;
@@ -175,21 +173,23 @@ pub fn fire_cannons(
             let velocity = match aim {
                 // Aimed shot: converge on the click point, ground-frame so the
                 // ball lands where the player clicked. Silent if it can't bear.
-                Some(target) => match aim_velocity(muzzle, normal, target) {
+                Some(target) => match aim_velocity(muzzle, normal, target, gun.speed) {
                     Some(v) => v,
                     None => continue,
                 },
-                None => normal * CANNONBALL_SPEED + Vec3::Y * CANNONBALL_LOFT + ship_velocity,
+                None => normal * gun.speed + Vec3::Y * CANNONBALL_LOFT + ship_velocity,
             };
             commands.spawn((
                 CannonBall {
                     velocity,
                     shooter: entity,
                     age: 0.0,
+                    blast: gun.blast,
+                    pierce: gun.pierce,
                 },
                 Mesh3d(assets.ball_mesh.clone()),
                 MeshMaterial3d(assets.ball_material.clone()),
-                Transform::from_translation(muzzle),
+                Transform::from_translation(muzzle).with_scale(Vec3::splat(gun.ball_scale)),
             ));
             spawn_effect(
                 &mut commands,
@@ -279,9 +279,11 @@ pub fn update_cannonballs(
                 if ship_entity == ball.shooter || newly_sunk.contains(&ship_entity) {
                     continue;
                 }
-                if point.distance_squared(ship_transform.translation)
-                    > SHIP_BOUNDS_RADIUS * SHIP_BOUNDS_RADIUS
-                {
+                // Quick reject on the hull's own footprint radius (flat, so
+                // tall rigs don't need padding — the grid lookup handles y).
+                let to_ship = point - ship_transform.translation;
+                let bound = voxels.radius + BLOCK_SIZE;
+                if to_ship.xz().length_squared() > bound * bound {
                     continue;
                 }
                 let cell = voxels.world_to_grid(ship_transform, point);
@@ -289,15 +291,26 @@ pub fn update_cannonballs(
                     continue;
                 }
 
-                let sank = apply_blast(
+                let mut sank = apply_blast(
                     &mut commands,
                     &assets,
                     &mut voxels,
                     ship_transform,
                     cell,
-                    BLAST_RADIUS,
+                    ball.blast,
                     ball.velocity * 0.15,
                 );
+                if ball.pierce > 0 {
+                    sank |= apply_pierce(
+                        &mut commands,
+                        &assets,
+                        &mut voxels,
+                        ship_transform,
+                        point,
+                        ball.velocity,
+                        ball.pierce,
+                    );
+                }
                 spawn_effect(
                     &mut commands,
                     &assets,
@@ -423,21 +436,71 @@ pub fn apply_blast(
         .copied()
         .collect();
     for cell in blasted {
-        let voxel = voxels.blocks.remove(&cell).unwrap();
-        commands.entity(voxel.entity).despawn();
-        let world = voxels.grid_to_world(ship_transform, cell);
-        commands.spawn((
-            Debris {
-                velocity: jitter(world) * 2.5 + Vec3::Y * 2.0 + kick,
-                spin: jitter(world + Vec3::splat(31.7)) * 6.0,
-                age: 0.0,
-            },
-            Mesh3d(assets.cube.clone()),
-            MeshMaterial3d(assets.block_materials[&voxel.id].clone()),
-            Transform::from_translation(world).with_scale(Vec3::splat(0.85)),
-        ));
+        knock_off_block(commands, assets, voxels, ship_transform, cell, kick);
     }
     voxels.damage_fraction() >= SINK_LOSS_FRACTION
+}
+
+/// A piercing shot: from the entry point, drill along the flight line and
+/// destroy up to `budget` further blocks. The ray keeps going through cells
+/// already emptied (or hollow interiors), so a culverin ball can punch in one
+/// side of a hull and out the other. Returns whether the damage was fatal.
+pub fn apply_pierce(
+    commands: &mut Commands,
+    assets: &GameAssets,
+    voxels: &mut ShipVoxels,
+    ship_transform: &Transform,
+    entry: Vec3,
+    velocity: Vec3,
+    budget: i32,
+) -> bool {
+    let dir = velocity.normalize_or_zero();
+    let kick = velocity * 0.2;
+    let mut destroyed = 0;
+    let mut last_cell = None;
+    // Sample finer than a block so diagonal lines don't skip cells; give the
+    // ray a few blocks of slack beyond the budget for gaps in the hull.
+    let max_travel = (budget as f32 + 4.0) * BLOCK_SIZE;
+    let mut travel = 0.3 * BLOCK_SIZE;
+    while travel <= max_travel && destroyed < budget {
+        let cell = voxels.world_to_grid(ship_transform, entry + dir * travel);
+        travel += 0.35 * BLOCK_SIZE;
+        if last_cell == Some(cell) {
+            continue;
+        }
+        last_cell = Some(cell);
+        if voxels.blocks.contains_key(&cell) {
+            knock_off_block(commands, assets, voxels, ship_transform, cell, kick);
+            destroyed += 1;
+        }
+    }
+    voxels.damage_fraction() >= SINK_LOSS_FRACTION
+}
+
+/// Remove one block from the grid and send it tumbling off as debris.
+fn knock_off_block(
+    commands: &mut Commands,
+    assets: &GameAssets,
+    voxels: &mut ShipVoxels,
+    ship_transform: &Transform,
+    cell: IVec3,
+    kick: Vec3,
+) {
+    let Some(voxel) = voxels.blocks.remove(&cell) else {
+        return;
+    };
+    commands.entity(voxel.entity).despawn();
+    let world = voxels.grid_to_world(ship_transform, cell);
+    commands.spawn((
+        Debris {
+            velocity: jitter(world) * 2.5 + Vec3::Y * 2.0 + kick,
+            spin: jitter(world + Vec3::splat(31.7)) * 6.0,
+            age: 0.0,
+        },
+        Mesh3d(assets.cube.clone()),
+        MeshMaterial3d(assets.block_materials[&voxel.id].clone()),
+        Transform::from_translation(world).with_scale(Vec3::splat(0.85)),
+    ));
 }
 
 /// Mark a ship as going down and bob part of the wreck up as flotsam,
@@ -498,7 +561,7 @@ fn spawn_effect(
 /// so the gun stays silent. Velocity is in the world (ground) frame — ship
 /// motion is intentionally not inherited, so the ball lands where the player
 /// clicked. Out-of-range targets get the 45° max-range shot toward the point.
-fn aim_velocity(muzzle: Vec3, normal: Vec3, target: Vec3) -> Option<Vec3> {
+fn aim_velocity(muzzle: Vec3, normal: Vec3, target: Vec3, speed: f32) -> Option<Vec3> {
     let to = target - muzzle;
     let flat = Vec3::new(to.x, 0.0, to.z);
     let d = flat.length();
@@ -510,7 +573,7 @@ fn aim_velocity(muzzle: Vec3, normal: Vec3, target: Vec3) -> Option<Vec3> {
     if beam.dot(hdir) < GUN_TRAVERSE_COS {
         return None;
     }
-    let s = CANNONBALL_SPEED;
+    let s = speed;
     let h = muzzle.y; // target sits at the waterline, world y = 0
     // Hitting (d, -h) at fixed speed s reduces to k·u² − d·u + (k − h) = 0 for
     // u = tan(elevation), with k = g·d² / (2·s²). The smaller root is the flat

@@ -107,7 +107,7 @@ pub fn update_hud(
             crate::build::PlayMode::Build => {
                 let def = crate::blocks::def(build_state.selected);
                 format!(
-                    "BUILD MODE — 1-7 select block  ·  click place ({} costs {})  ·  right-click remove (refund)  ·  Tab: sail",
+                    "BUILD MODE — 1-0 select block  ·  click place ({} costs {})  ·  right-click remove (refund)  ·  Tab: sail",
                     def.name, def.cost,
                 )
             }
