@@ -25,11 +25,17 @@ pub fn setup_assets(
 ) {
     let mut block_materials = HashMap::new();
     for id in blocks::ALL {
+        let color = blocks::def(id).color;
         block_materials.insert(
             id,
             materials.add(StandardMaterial {
-                base_color: blocks::def(id).color,
+                base_color: color,
                 perceptual_roughness: 0.9,
+                alpha_mode: if color.alpha() < 1.0 {
+                    AlphaMode::Blend
+                } else {
+                    AlphaMode::Opaque
+                },
                 ..default()
             }),
         );

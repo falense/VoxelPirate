@@ -18,7 +18,7 @@ use bevy::input::mouse::AccumulatedMouseScroll;
 use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::prelude::*;
 
-use ship::PlayerShip;
+use ship::{PlayerShip, ShipVoxels};
 
 fn main() {
     let mut app = App::new();
@@ -35,6 +35,14 @@ fn main() {
     // Autopilot pacing test: the player ship fights on its own.
     if std::env::args().any(|arg| arg == "--demo") {
         app.init_resource::<enemy::DemoMode>();
+    }
+    // Log frame-rate diagnostics; per-cube ship rendering is the known perf
+    // risk (see spec 002), so keep this handy until greedy meshing lands.
+    if std::env::args().any(|arg| arg == "--diag") {
+        app.add_plugins((
+            bevy::diagnostic::FrameTimeDiagnosticsPlugin::default(),
+            bevy::diagnostic::LogDiagnosticsPlugin::default(),
+        ));
     }
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
@@ -128,6 +136,13 @@ fn setup_scene(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(-16.0, 9.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
+        // Sky fill so faces turned away from the sun (the whole ship, seen
+        // from the chase camera) stay readable instead of going black.
+        AmbientLight {
+            color: Color::srgb(0.75, 0.85, 1.0),
+            brightness: 400.0,
+            ..default()
+        },
         // Haze the horizon into the sky so the finite ocean plane never
         // shows an edge.
         DistanceFog {
@@ -156,22 +171,24 @@ fn chase_camera(
     time: Res<Time>,
     scroll: Res<AccumulatedMouseScroll>,
     mut zoom: Local<f32>,
-    players: Query<&Transform, (With<PlayerShip>, Without<Camera3d>)>,
+    players: Query<(&Transform, &ShipVoxels), (With<PlayerShip>, Without<Camera3d>)>,
     mut cameras: Query<&mut Transform, With<Camera3d>>,
 ) {
-    let Ok(target) = players.single() else {
+    let Ok((target, voxels)) = players.single() else {
         return;
     };
     let Ok(mut camera) = cameras.single_mut() else {
         return;
     };
-    *zoom = (*zoom + scroll.delta.y * 1.5).clamp(-18.0, 6.0);
-    let distance = 16.0 - *zoom; // 10 (close) .. 34 (overview)
+    *zoom = (*zoom + scroll.delta.y * 1.5).clamp(-18.0, 8.0);
+    // Base the framing on hull size so upgrading to a bigger ship (or the
+    // tall-rigged hulls generally) never leaves the camera inside the rig.
+    let distance = (voxels.radius * 3.0 - *zoom).max(voxels.radius * 1.5);
     let forward = target.rotation * Vec3::X;
     let forward = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
-    let desired = target.translation - forward * distance + Vec3::Y * (distance * 0.5);
+    let desired = target.translation - forward * distance + Vec3::Y * (distance * 0.6);
     let ease = 1.0 - (-time.delta_secs() * 3.0).exp();
     camera.translation = camera.translation.lerp(desired, ease);
-    let look_at = target.translation + forward * 6.0 + Vec3::Y;
+    let look_at = target.translation + forward * (voxels.radius * 0.4) + Vec3::Y * 3.0;
     camera.look_at(look_at, Vec3::Y);
 }

@@ -30,7 +30,9 @@ pub const ALL: [BlockId; 8] = [
 ];
 
 /// Static properties of a block type. Mass feeds into buoyancy and handling
-/// once real ship physics lands; color is a placeholder until textures.
+/// once real ship physics lands; color is a placeholder until textures. A
+/// color with alpha < 1 renders translucent and casts no shadow, so rigging
+/// doesn't wall off the chase camera's view of the sea.
 #[allow(dead_code)]
 pub struct BlockDef {
     pub name: &'static str,
@@ -75,7 +77,7 @@ pub fn def(id: BlockId) -> BlockDef {
         BlockId::Sail => BlockDef {
             name: "Sail",
             mass: 5.0,
-            color: Color::srgb(0.93, 0.91, 0.83),
+            color: Color::srgba(0.93, 0.91, 0.83, 0.62),
             gun: false,
             cost: 2,
         },

@@ -155,16 +155,24 @@ pub fn spawn_ship(
     let mut blocks = HashMap::new();
     commands.entity(ship).with_children(|parent| {
         for (pos, id) in &layout {
-            let entity = parent
-                .spawn((
-                    Mesh3d(assets.cube.clone()),
-                    MeshMaterial3d(assets.block_materials[id].clone()),
-                    Transform::from_translation(
-                        (pos.as_vec3() + Vec3::splat(0.5)) * BLOCK_SIZE - center,
-                    ),
-                ))
-                .id();
-            blocks.insert(*pos, Voxel { id: *id, entity });
+            let mut cube = parent.spawn((
+                Mesh3d(assets.cube.clone()),
+                MeshMaterial3d(assets.block_materials[id].clone()),
+                Transform::from_translation(
+                    (pos.as_vec3() + Vec3::splat(0.5)) * BLOCK_SIZE - center,
+                ),
+            ));
+            // Translucent blocks (sails) would otherwise cast opaque shadows.
+            if crate::blocks::def(*id).color.alpha() < 1.0 {
+                cube.insert(bevy::light::NotShadowCaster);
+            }
+            blocks.insert(
+                *pos,
+                Voxel {
+                    id: *id,
+                    entity: cube.id(),
+                },
+            );
         }
     });
 

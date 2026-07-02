@@ -39,7 +39,9 @@ pub fn run_selftest(
         return;
     };
     let viewport_of = |world: Vec3| camera.world_to_viewport(camera_transform, world).ok();
-    let deck_point = viewport_of(player.translation + Vec3::Y * 1.6);
+    // Aim at the afterdeck, behind the mainmast, so the build ray lands on an
+    // OakDeck block (refund 1) rather than snagging the mast or a sail.
+    let deck_point = viewport_of(player.translation + player.rotation * Vec3::new(-3.0, 2.1, 0.0));
     let sea_point = viewport_of(player.translation + player.rotation * Vec3::Z * 18.0);
 
     match state.step {
