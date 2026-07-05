@@ -71,6 +71,9 @@ pub fn update_flotsam(
     for (entity, mut piece, mut transform) in &mut flotsam {
         piece.age += dt;
         if piece.age > 120.0 {
+            // Adrift too long: bank it as scrap, same as the wave-clear
+            // sweep, so long battles don't quietly lose early-kill loot.
+            stats.salvage += crate::blocks::def(piece.id).cost;
             commands.entity(entity).despawn();
             continue;
         }
