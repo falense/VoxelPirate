@@ -6,11 +6,35 @@ block by block, and can be rebuilt block by block. Start on a barge, scavenge
 the wrecks of your enemies, and grow into a galleon before the Dreadnought
 comes for you.
 
-## How to play
+![Wave 1 opens: hostile sails on the horizon](docs/media/battle.png)
+
+## Building from source
+
+You need a [Rust toolchain](https://rustup.rs/) (edition 2024, so Rust 1.85
+or newer). On Linux, Bevy also needs the usual system libraries:
+
+```sh
+# Debian/Ubuntu
+sudo apt install g++ pkg-config libx11-dev libasound2-dev libudev-dev \
+    libxkbcommon-dev libwayland-dev
+```
+
+Then:
 
 ```sh
 cargo run --release
 ```
+
+The first build compiles Bevy and takes a while; after that it's quick.
+A debug `cargo run` works too — `Cargo.toml` sets `opt-level = 3` for
+dependencies so it stays playable.
+
+## How to play
+
+Battles come in waves; between them you're safe at the dock — repair,
+rebuild, buy a bigger hull, then set sail for the next fight.
+
+![The dock: build mode with the block hotbar](docs/media/dock.png)
 
 | Input | Action |
 |---|---|
@@ -18,30 +42,36 @@ cargo run --release
 | Left click | Fire the broadside facing the cursor |
 | Scroll | Zoom the chase camera |
 | `Tab` | Toggle build mode |
-| `1`-`7` (build) | Select block; click places, right-click removes |
+| `1`-`0` (build) | Select block; click places, right-click removes |
 | `Q` / `E` | Keyboard broadsides (fallback) |
 | `P` | Pause |
-| `R` | Set sail again after going down |
+| `R` (dock) | Repair — shipwrights work at half price |
+| `U` (dock) | Buy the next hull class |
+| `Enter` (dock) | Set sail for the next wave |
 
 ## The loop
 
-- Sink ships; their blocks bob up as **flotsam**. Sail over it: it repairs
-  your hull first, then banks as **salvage** (a scavenged cannon is worth 8,
-  gold plunder 5).
-- Salvage auto-buys your next hull: Barge → Brig → Frigate → Galleon.
+- Sink ships; their blocks bob up as **flotsam**, and bigger wrecks scatter
+  more gold plunder. Sail over it: it repairs your hull first, then banks as
+  **salvage**.
+- Back at the dock, salvage buys repairs and hull upgrades:
+  Barge → Brig → Frigate → Galleon.
 - In build mode you spend salvage to reshape your ship — more hull is more
-  durability, more cannons is more broadside.
+  durability, more cannons is more broadside. Culverins pierce, carronades
+  crater.
 - Mind the **wind** (intel line): running with it is a quarter faster.
 - Derelict wrecks are risk-free salvage. Ramming works, and hurts you both.
-- At 15 kills the **Dreadnought** is summoned. Sink it and the seas are
-  yours; the hunt continues for as long as you can stay afloat.
+- Wave 8 brings the **Dreadnought**. Sink it and the seas are yours; the
+  waves keep escalating for as long as you can stay afloat.
 
 ## Dev flags
 
 - `--selftest` — scripted smoke test: drives input resources, asserts the
   salvage economy in logs, saves screenshots to `/tmp/selftest_*.png`
 - `--demo` — the player ship fights on autopilot, for pacing observation
-- `--boss` — start at 15 kills in a frigate, next to the boss fight
+- `--boss` — skip ahead to the Dreadnought fight in a frigate
+- `--diag` — extra diagnostics
+- `--mute` — no audio
 
 ## Architecture
 
