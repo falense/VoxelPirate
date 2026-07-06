@@ -17,30 +17,6 @@ Format per entry:
 
 ## Open
 
-## Salvage economy rebalance — parked 2026-07-05
-**Blocked work:** economy tuning; the tier ramp past the brig is grindy.
-**Context:** Sondre reports salvage is too scarce to cover both upkeep and
-upgrades. Numbers confirm it: wreck loot is capped at 10 pieces + 1 gold
-chest regardless of ship size (`start_sinking`, combat.rs), so income stays
-~35–75/wave while upgrades cost 20/60/140 and dock repairs charge full block
-cost (an iron refit can eat a whole wave's income). At-sea flotsam pickup
-also repairs before it banks, so damage silently consumes loot.
-**Options:**
-- A: Loot scales with wreck value — extra plunder chests proportional to the
-  sunk ship's total block value. Income ramps with wave difficulty; repairs
-  stay a meaningful cost to weigh against upgrades.
-- B: Cheap upkeep — dock repairs free or half price; loot stays scarce, so
-  upgrades remain slow, deliberate purchases.
-- C: Both, gently — mild loot scaling plus half-price repairs; most
-  forgiving, economy mostly stops being a constraint.
-- D: Cheaper upgrades — flatten the curve (e.g. 20/45/90) so each tier lands
-  after ~1.5 waves of decent play.
-**Recommendation:** A — it fixes the structural flaw (flat income vs rising
-costs) while keeping damage economically meaningful, and it rewards hunting
-the bigger ships.
-(The related flotsam-despawn leak — loot vanishing at 120 s before the
-wave-clear sweep could bank it — was a dominated fix and shipped separately.)
-
 ## Wakes & combat feedback — parked 2026-07-02
 **Blocked work:** none (independent polish item).
 **Context:** the last unbuilt graphics upgrade — foam wake + bow spray,
@@ -49,6 +25,14 @@ Recommended next polish step: motion feedback compounds with the swell,
 and the sea still looks empty behind a moving ship.
 
 ## Resolved
+
+- **Salvage economy rebalance** — Option C chosen by Sondre 2026-07-06
+  ("both, gently"): sinking a ship now drops one gold chest per 200 salvage
+  of remaining wreck value (~2.5% bonus; sloop ≈ 2 chests, dreadnought ≈ 20),
+  and dock repairs charge half the block's registry cost. Background: income
+  was flat ~35–75/wave against a 20/60/140 upgrade ramp plus full-price
+  repairs. The flotsam-despawn leak (loot vanishing at 120 s before the
+  wave-clear sweep) was fixed separately as a dominated choice.
 
 - **Game-flow shape (dock interlude)** — chosen by Sondre 2026-07-02:
   wave-based matches, hull classes as explicit dock purchases (auto-upgrade

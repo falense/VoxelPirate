@@ -505,8 +505,9 @@ fn knock_off_block(
     ));
 }
 
-/// Mark a ship as going down and bob part of the wreck up as flotsam,
-/// plus one chest of gold plunder.
+/// Mark a ship as going down: bob a sample of the wreck up as flotsam, plus
+/// gold plunder scaling with the wreck's remaining block value — a sloop
+/// drops a couple of chests, a dreadnought a hoard.
 pub fn start_sinking(
     commands: &mut Commands,
     assets: &GameAssets,
@@ -522,12 +523,16 @@ pub fn start_sinking(
         let world = voxels.grid_to_world(ship_transform, *cell);
         crate::salvage::spawn_flotsam(commands, assets, *id, Vec3::new(world.x, 0.15, world.z));
     }
-    crate::salvage::spawn_flotsam(
-        commands,
-        assets,
-        blocks::BlockId::Gold,
-        ship_transform.translation.with_y(0.15),
-    );
+    // One chest per 200 salvage of wreck value (chests bank 5 each, so the
+    // bonus is ~2.5% of the ship) keeps the tier ramp affordable without
+    // flooding the early game.
+    let value: u32 = voxels.blocks.values().map(|id| blocks::def(*id).cost).sum();
+    let center = ship_transform.translation.with_y(0.15);
+    for i in 0..(1 + value / 200) {
+        let angle = i as f32 * 2.399963; // golden angle
+        let offset = Vec3::new(angle.cos(), 0.0, angle.sin()) * (1.5 + i as f32 * 0.7);
+        crate::salvage::spawn_flotsam(commands, assets, blocks::BlockId::Gold, center + offset);
+    }
 }
 
 fn spawn_effect(

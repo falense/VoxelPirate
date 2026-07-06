@@ -254,7 +254,9 @@ pub fn dock_input(
 }
 
 /// Refit missing plan blocks (hull first, lowest cells up) while salvage
-/// lasts. Returns how many blocks were fitted.
+/// lasts. Dock shipwrights work at half the block's registry cost, so
+/// battle damage doesn't eat the upgrade fund. Returns how many blocks
+/// were fitted.
 fn repair_ship(stats: &mut GameStats, voxels: &mut ShipVoxels) -> u32 {
     let mut missing: Vec<(IVec3, crate::blocks::BlockId)> = voxels
         .plan
@@ -265,7 +267,7 @@ fn repair_ship(stats: &mut GameStats, voxels: &mut ShipVoxels) -> u32 {
     missing.sort_by_key(|(cell, _)| (cell.y, cell.x, cell.z));
     let mut repaired = 0;
     for (cell, id) in missing {
-        let cost = crate::blocks::def(id).cost;
+        let cost = crate::blocks::def(id).cost.div_ceil(2);
         if stats.salvage < cost {
             break;
         }
