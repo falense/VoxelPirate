@@ -2,6 +2,8 @@
 name = "voxelpirates"
 version = "0.1.0"
 edition = "2024"
+description = "Voxel pirate game — every ship is a sailing, destructible voxel grid"
+repository = "https://github.com/falense/VoxelPirate"
 
 [dependencies]
 # `wav` enables rodio's WAV decoder — our sound effects (src/audio.rs) are
